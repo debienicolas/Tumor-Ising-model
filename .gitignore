@@ -3,3 +3,5 @@ ising_results/
 imgs/
 
 sar.py
+
+__pycache__/
