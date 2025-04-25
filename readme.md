@@ -27,7 +27,9 @@ The first component of the Ising model is the topology structure. The classical 
 The independent variables $\sigma_i$ can be in 2 possible states, $\sigma_i = \pm 1$ reflecting the physical assumption that only 2 possibilities exist such as spin up/down(Potts model generalizes to multiple states). Assigning each lattice point a state gives us a configuration fo the system $(\sigma_1,..., \sigma_N)$.    
 
 A second component is called the *Hamiltonian* function which denotes the energy of a configuration $\sigma$. The Ising Hamiltoniain is formulated as follows:  
-$$ H(\sigma) = -\sum_{\langle i,j\rangle} J_{i,j} \sigma_i \sigma_j - \mu \sum $$ 
+```math
+H(\sigma) = -\sum_{\langle i,j\rangle} J_{i,j} \sigma_i \sigma_j - \mu \sum
+```
 
 
 
