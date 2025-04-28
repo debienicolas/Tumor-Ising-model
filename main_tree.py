@@ -13,10 +13,9 @@ import networkx as nx
 import os
 from datetime import datetime
 import pandas as pd
-from tree import kTree
 
 class IsingModel:
-    def __init__(self, nodes, neighbors, temperature=2.0, J=1.0, pos=None):
+    def __init__(self, nodes, neighbors, temperature=2.0, J=1.0, G=None):
         """
         Initialize the Ising model for a 2D square lattice.
         Random spin initialisation.
@@ -47,7 +46,8 @@ class IsingModel:
         self.magnetization_final = None
 
         # positions for graph plotting
-        self.pos = pos
+        self.pos = None
+        self.G = G
 
 
 @numba.njit(nopython=True)
@@ -111,19 +111,33 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
     return spins
 
 @numba.njit(nopython=True)
-def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_iterations:int) -> np.ndarray:
+def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mc:int) -> np.ndarray:
     """
     Simulate the Ising model.
     """
     # save 100 frames no matter the amount of iterations
-    save_every = n_iterations // 100
+    save_every = (n_equilibration + n_mc) // 100
     saved_frames = []
 
-    for i in range(n_iterations):
+    recording_interval = 10
+    # amount of measurements
+    n_measurements = n_mc // recording_interval
+    mag = np.zeros(n_measurements)
+    energy = np.zeros(n_measurements)
+
+    
+    for i in range(n_equilibration):
         spins = metropolis_step(spins, neighbors, J, beta)
         if i % save_every == 0:
             saved_frames.append(spins.copy())
-    return saved_frames
+    for i in range(n_mc):
+        spins = metropolis_step(spins, neighbors, J, beta)
+        if i % save_every == 0:
+            saved_frames.append(spins.copy())
+        if i % recording_interval == 0:
+            mag[i//recording_interval] = calc_magnetization(spins)
+            energy[i//recording_interval] = calc_hamiltonian(spins, neighbors, J) / spins.size
+    return saved_frames, mag, energy
 
 def simulate_ising_model(model: IsingModel, n_iterations: int=10_000) -> IsingModel:
     """
@@ -142,60 +156,80 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000) -> IsingMo
     neighbors = model.neighbors
     J = model.J
     beta = model.beta
+
+    # set the equilibration steps and mcsteps
+    # set the mcsteps to 1000
+    equilibration_steps = n_iterations // 2
+    mcsteps = n_iterations - equilibration_steps
     
     start_time = time.time()
-    model.frames = simulate(spins, neighbors, J, beta, n_iterations)
+    model.frames, model.magnetizations, model.energies = simulate(spins, neighbors, J, beta, equilibration_steps, mcsteps)
     
     elapsed_time = time.time() - start_time
     print("Time taken: ", elapsed_time)
 
     model.spins_final = spins
-    model.energy_final = calc_hamiltonian(spins, neighbors, J) / spins.size
-    model.magnetization_final = calc_magnetization(spins)
+    model.energy_final = np.sum(model.energies) / np.size(model.energies)
+    model.magnetization_final = np.sum(model.magnetizations) / np.size(model.magnetizations)
+    print(f"Final energy: {model.energy_final}, Final magnetization: {model.magnetization_final}")
+    print(f"Amount of samples: {np.size(model.energies)}")
 
     return model
 
-def plot_graph(nodes:np.ndarray, neighbors:np.ndarray, ax=None, pos=None):
+def plot_graph(nodes:np.ndarray, neighbors:np.ndarray, ax=None, G=None, draw_edges=True):
+    """
+    Plot the graph of the Ising model. 
+    If the G is provided, use it to plot the graph with node colors being the spin values.
+    If the graph is stacked, make sure to have done the offsetting of the positions
+    If the G is not provided, create a new graph from the nodes and neighbors.
+    """
     # Use provided axes or create new figure
     if ax is None:
-        fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_subplot(111)
+        # check if the graph has a layers attribute -> stacked graph
+        if "layers" in G.graph:
+            fig = plt.figure(figsize=(15, 3*G.graph["layers"]))
+            ax = fig.add_subplot(111)
+        else:
+            fig = plt.figure(figsize=(10, 10))
+            ax = fig.add_subplot(111)
+    if G is None:
+        G = nx.Graph()  # Use undirected graph to avoid cycles
+        # Add nodes with spin values as attributes
+        for i, spin in enumerate(nodes):
+            G.add_node(i, spin=int(spin))
+        
+        # Add edges from the neighbors array (avoiding duplicates)
+        edges_added = set()
+        for i in range(len(nodes)):
+            for j in range(neighbors.shape[1]):
+                neighbor = neighbors[i, j]
+                if neighbor != -1:
+                    # Only add edge if we haven't seen it before
+                    edge = tuple(sorted([i, neighbor]))
+                    if edge not in edges_added:
+                        G.add_edge(i, neighbor)
+                        edges_added.add(edge)
+        if pos is None:
+            pos = graphviz_layout(G, prog="twopi") # circo or twopi
     
-    G = nx.Graph()  # Use undirected graph to avoid cycles
-    # Add nodes with spin values as attributes
-    for i, spin in enumerate(nodes):
-        G.add_node(i, spin=int(spin))
-    
-    # Add edges from the neighbors array (avoiding duplicates)
-    edges_added = set()
-    for i in range(len(nodes)):
-        for j in range(neighbors.shape[1]):
-            neighbor = neighbors[i, j]
-            if neighbor != -1:
-                # Only add edge if we haven't seen it before
-                edge = tuple(sorted([i, neighbor]))
-                if edge not in edges_added:
-                    G.add_edge(i, neighbor)
-                    edges_added.add(edge)
-    if pos is None:
-        pos = graphviz_layout(G, prog="twopi") # circo or twopi
+    else:
+        pos = nx.get_node_attributes(G, 'pos')
     # Draw nodes with colors based on spin values
     node_colors = ['blue' if spin == 1 else 'red' for spin in nodes]
     
     # Draw the network on the provided axes
-    nx.draw(G, pos, ax=ax,
-            node_color=node_colors,
-            node_size=10,
-            with_labels=False,
-            font_color='white',
-            font_weight='bold')
+    # if the graph is stacked, don't draw the edges, only the nodes
+    if not draw_edges or "layers" in G.graph:
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=10)
+    else:
+        nx.draw(G, pos, ax=ax, node_color=node_colors, node_size=10, with_labels=False)
     
     # Add a legend
     blue_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', 
                             markersize=10, label='Spin = +1')
     red_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
                             markersize=10, label='Spin = -1')
-    ax.legend(handles=[blue_patch, red_patch], loc='upper right')
+    #ax.legend(handles=[blue_patch, red_patch])
     
     return ax
 
@@ -269,7 +303,7 @@ def animate_ising_model(model: IsingModel, output_dir="output", T=None):
     # Process each frame
     for i, spin_array in enumerate(model.frames):
         ax.clear()  # Clear previous frame
-        plot_graph(spin_array, model.neighbors, ax=ax, pos=model.pos)
+        plot_graph(spin_array, model.neighbors, ax=ax, G=model.G)
         
         # Add frame number to title
         if T is not None:

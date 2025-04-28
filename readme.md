@@ -5,19 +5,34 @@ This code consist of 3 main steps:
 2. Running the Ising model
 3. Analysis of the Ising model results (TO DO)
 
+To do:
+- fix the magnetization and energy calculations
+- Dimensional crossover
+- Add branching in time
+
 ## Results: Branching 
 
-![Ising Model Simulation](output_mam_final/n_iter10000_J2.0_spins.png)
+<div align="center">
+<img src="output_mam_final/n_iter10000_J2.0_spins.png" alt="Ising Model Simulation" width="600">
+</div>
 
-![energy_magn](output_mam_final/magn_energy.png)
+<div align="center">
+<img src="output_mam_final/magn_energy.png" alt="energy_magn" width="600">
+</div>
 
-![animation](output_mam_final/animation_20250425_111009_T1.0_J2.0_iters10000.gif)
+<div align="center">
+<img src="output_mam_final/animation_20250425_111009_T1.0_J2.0_iters10000.gif" alt="animation" width="600">
+</div>
 
 
 ## Results: Grid 
 
-![temp_grid](output_grid/ising_simulation_temps_spins_30x30_1.0_10000.png)
-![temp_stats](output_grid/ising_simulation_temps_30x30_1.0_10000.png)
+<div align="center">
+<img src="output_grid/ising_simulation_temps_spins_30x30_1.0_10000.png" alt="temp_grid" width="600">
+</div>
+<div align="center">
+<img src="output_grid/ising_simulation_temps_30x30_1.0_10000.png" alt="temp_stats" width="600">
+</div>
 
 ## Background: The Ising model in physics
 
@@ -27,6 +42,7 @@ The first component of the Ising model is the topology structure. The classical 
 The independent variables $\sigma_i$ can be in 2 possible states, $\sigma_i = \pm 1$ reflecting the physical assumption that only 2 possibilities exist such as spin up/down(Potts model generalizes to multiple states). Assigning each lattice point a state gives us a configuration fo the system $(\sigma_1,..., \sigma_N)$.    
 
 A second component is called the *Hamiltonian* function which denotes the energy of a configuration $\sigma$. The Ising Hamiltoniain is formulated as follows:  
+
 ```math
 H(\sigma) = -\sum_{\langle i,j\rangle} J_{i,j} \sigma_i \sigma_j - \mu \sum
 ```
@@ -34,7 +50,6 @@ H(\sigma) = -\sum_{\langle i,j\rangle} J_{i,j} \sigma_i \sigma_j - \mu \sum
 
 
 
-1D results: each site only interacts with its left and right neighbor -> no phase transition.
 
 
 

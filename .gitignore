@@ -5,3 +5,8 @@ imgs/
 sar.py
 
 __pycache__/
+
+output_dim
+
+# ignore output_directories
+output_*

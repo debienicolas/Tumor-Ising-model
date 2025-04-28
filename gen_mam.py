@@ -2,6 +2,7 @@ import numpy as np
 from numpy import random
 from numpy import linalg as LA
 import os
+import pickle
 
 import matplotlib.pyplot as plt
 from pylab import *
@@ -12,6 +13,7 @@ rc('font',size=20)
 rc('font',family='serif')
 rc('axes',labelsize=20)
 
+
 from tqdm import tqdm
 import networkx as nx
 import random 
@@ -20,6 +22,7 @@ from numba import int32, float32
 from numba.experimental import jitclass
 from numba import types
 
+np.random.seed(43)
 
 class MamSimulation:
 
@@ -233,7 +236,7 @@ class MamSimulation:
     
 
     def plot_network(self, save_path=None):
-        fig, ax = plt.subplots(figsize=(9,9))
+        fig, ax = plt.subplots(figsize=(15,15))
         ms = 1.5
 
         def step(till,evolve):
@@ -287,7 +290,8 @@ class MamSimulation:
                         G.add_edge(i, j)
         
         pos = nx.get_node_attributes(G, 'pos')
-        nx.draw(G, pos=pos, with_labels=False, node_size=10)
+        fig, ax = plt.subplots(figsize=(15,15))
+        nx.draw(G, pos=pos, with_labels=False, node_size=10, ax=ax)
         if save_path:
             plt.savefig(save_path)
         else:
@@ -300,18 +304,22 @@ class MamSimulation:
 
 if __name__ == "__main__":
 
-    np.random.seed(43)
+
     
-    output_dir = "output_mam_final"
+    output_dir = "output_mam_final_3"
     os.makedirs(output_dir, exist_ok=True)
     mam = MamSimulation(tmax=150)
     mam.simulate()
     mam.plot_network(os.path.join(output_dir, "network_structure.png"))
     mam.convert_to_graph(os.path.join(output_dir, "network_graph.png"))
 
+    # save the generated graph to a pickle file
+    with open(os.path.join(output_dir, "network_graph.pkl"), "wb") as f:
+        pickle.dump(mam.G, f)
+
     from utils import graph_to_model_format
     nodes, neighbors = graph_to_model_format(mam.G)
-    print(nodes.size)
+    print("Total sites: ", nodes.size)
     pos = nx.get_node_attributes(mam.G, 'pos')
     from main_tree import IsingModel, simulate_ising_model, animate_ising_model
 
@@ -334,7 +342,7 @@ if __name__ == "__main__":
         model = IsingModel(nodes, neighbors, temperature=T, J=J, pos=pos)
         model = simulate_ising_model(model, n_iterations=n_iter)
         spins_final = model.spins_final
-        animate_ising_model(model, output_dir=output_dir, T=round(T, 2))
+        #animate_ising_model(model, output_dir=output_dir, T=round(T, 2))
         magnetization.append(model.magnetization_final)
         energy.append(model.energy_final)
         models.append(model)
@@ -355,16 +363,17 @@ if __name__ == "__main__":
     #plt.show()
 
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(20, 10))
     sp = plt.subplot(1, 2, 1)
     sp.scatter(temps, energy, label='energy', marker='o', color="IndianRed")
     sp.set_xlabel("Temperature")
     sp.set_ylabel("Energy")
+    #plt.legend()
     sp = plt.subplot(1, 2, 2)
     sp.scatter(temps, magnetization, label='magnetization', marker='o', color="RoyalBlue")
     sp.set_xlabel("Temperature")
     sp.set_ylabel("Magnetization")
-    plt.legend()
+    #plt.legend()
     plt.savefig(os.path.join(output_dir, f"n_iter{n_iter}_J{J}_magnetization_energy.png"))
     plt.show()
 
