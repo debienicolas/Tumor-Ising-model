@@ -1,12 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.colors import ListedColormap
 import time 
-from scipy.constants import Boltzmann
 from tqdm import tqdm
 import numba
-from PIL import Image
 import os
 
 class IsingModel:
@@ -362,17 +359,20 @@ def simulate_ising_model_temps(temps: np.ndarray, grid_size: int=50, J: float=1.
 
 # Example usage
 if __name__ == "__main__":
+    output_dir = "output_grid"
+    os.makedirs(output_dir, exist_ok=True)
+
     # Run a single simulation
     model = IsingModel(size=100, temperature=0.5, J=1.0)
-    model = simulate_ising_model(model, n_iterations=10_000, plot=f"{model.temperature}")
+    model = simulate_ising_model(model, n_iterations=10_000, plot=os.path.join(output_dir, f"{model.temperature}"))
     print("Final model energy: ", model.energy_final, "Final model magnetization: ", model.magnetization_final)
 
     model = IsingModel(size=100, temperature=2.27, J=1.0)
-    model = simulate_ising_model(model, n_iterations=10_000, plot=f"{model.temperature}")
+    model = simulate_ising_model(model, n_iterations=10_000, plot=os.path.join(output_dir, f"{model.temperature}"))
     print("Final model energy: ", model.energy_final, "Final model magnetization: ", model.magnetization_final)
 
     model = IsingModel(size=100, temperature=4.0, J=1.0)
-    model = simulate_ising_model(model, n_iterations=10_000, plot=f"{model.temperature}")
+    model = simulate_ising_model(model, n_iterations=10_000, plot=os.path.join(output_dir, f"{model.temperature}"))
     print("Final model energy: ", model.energy_final, "Final model magnetization: ", model.magnetization_final)
 
 

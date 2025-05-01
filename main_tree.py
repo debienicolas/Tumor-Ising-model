@@ -5,7 +5,6 @@ from matplotlib.colors import ListedColormap
 import pydot
 from networkx.drawing.nx_agraph import graphviz_layout
 import time 
-from scipy.constants import Boltzmann
 from tqdm import tqdm
 import numba
 from PIL import Image
@@ -13,41 +12,13 @@ import networkx as nx
 import os
 from datetime import datetime
 import pandas as pd
+from branch_sim import MamSimulation
+from scipy.spatial import KDTree
+from collections import defaultdict
 
-class IsingModel:
-    def __init__(self, nodes, neighbors, temperature=2.0, J=1.0, G=None):
-        """
-        Initialize the Ising model for a 2D square lattice.
-        Random spin initialisation.
-        
-        Args:
-            size: Size of the square lattice
-            temperature: Temperature parameter
-            J: Coupling constant, positive for ferromagnetic coupling
-        """
-        self.temperature = temperature
-        self.J = J
-        self.beta = 1 / temperature # inverse temperature
-
-        # Initialize random spin configuration
-        self.spins = nodes
-        self.neighbors = neighbors
-        
-        # For tracking observables
-        self.energies = []
-        self.magnetizations = []
-
-        # for storing animation frames
-        self.frames = []
-
-        # For storing the final results
-        self.spins_final = None
-        self.energy_final = None
-        self.magnetization_final = None
-
-        # positions for graph plotting
-        self.pos = None
-        self.G = G
+from utils.gen_utils import graph_to_model_format
+from utils.branch_sim_utils import convert_branch_coords_to_graph, model_format_at_time
+from IsingModel import IsingModel 
 
 
 @numba.njit(nopython=True)
@@ -70,7 +41,12 @@ def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
     H = 0
     for i in range(0,spins.shape[0]):
         neighs_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
+        if np.isnan(neighs_sum):
+            print(f"NaN neighbor sum at node {i}")
+            continue
         H += -J * spins[i] * neighs_sum
+    if H == 0:
+        print("Zero Hamiltonian detected")
     return H / 2
 
 @numba.njit(nopython=True)
@@ -111,35 +87,162 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
     return spins
 
 @numba.njit(nopython=True)
-def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mc:int) -> np.ndarray:
+def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mcmc:int, n_samples:int, n_sample_interval:int) -> np.ndarray:
     """
     Simulate the Ising model.
+    Save every spins during the mcmc steps.
+    Return the final magnetization and energy over the amount of samples and interval.
+
+    Returns:
+        spins_collection: The collection of spins after each mcmc step
+        mag: The magnetization of the system: average over the amount of samples
+        energy: The energy of the system: average over the amount of samples
     """
-    # save 100 frames no matter the amount of iterations
-    save_every = (n_equilibration + n_mc) // 100
-    saved_frames = []
 
-    recording_interval = 10
-    # amount of measurements
-    n_measurements = n_mc // recording_interval
-    mag = np.zeros(n_measurements)
-    energy = np.zeros(n_measurements)
+    assert spins.ndim == 1, "spins must be a 1D array"
 
+    # initialize the array to save all the mcmc spin configurations
+    spins_collection = np.zeros((n_mcmc, spins.size), dtype=np.int8)
+
+    # initialize the arrays to save the magnetization and energy
+    sampl_magn = np.zeros(n_samples)
+    sampl_energy = np.zeros(n_samples)
+
+    # calc the start index for the samples starting from the last sample
+    start_index = n_mcmc - n_samples * n_sample_interval
     
     for i in range(n_equilibration):
         spins = metropolis_step(spins, neighbors, J, beta)
-        if i % save_every == 0:
-            saved_frames.append(spins.copy())
-    for i in range(n_mc):
+    for i in range(n_mcmc):
         spins = metropolis_step(spins, neighbors, J, beta)
-        if i % save_every == 0:
-            saved_frames.append(spins.copy())
-        if i % recording_interval == 0:
-            mag[i//recording_interval] = calc_magnetization(spins)
-            energy[i//recording_interval] = calc_hamiltonian(spins, neighbors, J) / spins.size
-    return saved_frames, mag, energy
+        if i % n_sample_interval == 0 and i >= start_index:
+            sample_index = (i - start_index) // n_sample_interval
+            sampl_magn[sample_index] = calc_magnetization(spins)
+            sampl_energy[sample_index] = calc_hamiltonian(spins, neighbors, J) / spins.size
+        # save the spins
+        spins_collection[i] = spins.copy()
+    
+    # average the magnetization and energy over the amount of samples
+    mag = np.mean(sampl_magn)
+    energy = np.mean(sampl_energy)
 
-def simulate_ising_model(model: IsingModel, n_iterations: int=10_000) -> IsingModel:
+    return spins_collection, mag, energy
+
+
+
+def branch_evolve(spins:np.ndarray, coords:np.ndarray, evolve:np.ndarray, time_step:int, dist_thres:float=1.5, dim_cross:bool=False) -> np.ndarray:
+    """
+    Evolve the branch by adding more nodes to the tips
+    This is not the most efficient way to do this, but is good for now
+    Oveview of the method:
+    - construct the graph of the grown branch
+    - update the corresponding nodes to with the existing spins values
+
+    Args:
+        spins: the spins of the current branch
+        coords: the coordinates of the current branch
+        evolve: the amount of nodes added at each time step
+        time_step: the time step to evolve the branch to
+        distance_threshold: the distance threshold for the graph
+    """
+
+    next_coords = coords[:np.sum(evolve[:time_step])]
+    
+    nodes, neighbors = model_format_at_time(next_coords, evolve, time_step, dim_cross=dim_cross)
+
+    if dim_cross == 0:
+        # update the spins of the current nodes -> spins maintained for the current branch
+        nodes[:len(spins)] = spins
+    else:
+        # go over each layer and update the spins of the current nodes
+        for i in range(dim_cross):
+            n_nodes_per_layer_new = nodes.shape[0] // dim_cross
+            n_nodes_per_layer_old = spins.shape[0] // dim_cross
+            start_idx_new = i * n_nodes_per_layer_new
+            start_idx_old = i * n_nodes_per_layer_old
+            end_idx_old = start_idx_old + n_nodes_per_layer_old
+            end_idx_new = start_idx_new + n_nodes_per_layer_old
+            #print(start_idx_new, end_idx_new, start_idx_old, end_idx_old)
+            
+            nodes[start_idx_new:end_idx_new] = spins[start_idx_old:end_idx_old]
+    return nodes, neighbors
+
+    # # get the new coordinates of the branch
+    # new_time = time_step
+    # next_coords = get_branch_at_time(coords, evolve, new_time)
+    # current_coords = get_branch_at_time(coords, evolve, time_step-1)
+    # to_keep_coords = next_coords[current_coords.shape[0]:]
+
+
+    # G = model.G
+    # on_curr_nodes = len(G.nodes)
+    # # set the spins of the current nodes
+    # # create a tree of the next coordinates (all coordinates of the grown branch)
+    # tree = KDTree(next_coords)
+    # # add the new nodes to the graph
+    # for i in range(len(to_keep_coords)):
+    #     G.add_node(on_curr_nodes + i, pos=to_keep_coords[i])
+    # # add the edges to the graph
+    # for i in range(len(G.nodes)):
+    #     # check if there are nodes within the distance threshold
+    #     dists = tree.query_ball_point(G.nodes[i]["pos"], r=distance_threshold)
+    #     for j in dists:
+    #         if i != j and j not in G.neighbors(i):
+    #             G.add_edge(i, j)
+    
+    # # now we have the graph of the grown branch
+    # # conver the graph to the model format
+    # new_spins = np.zeros(next_coords.shape[0])
+    # new_spins[:len(current_coords)] = spins
+    # new_spins[len(current_coords):] = np.random.choice([-1, 1], size=len(to_keep_coords))
+    # _, new_neighbors = graph_to_model_format(G)
+
+    # # update the model with the new graph and the new timestep
+    # model.G = G
+    # model.current_branch_time = new_time
+
+    # assert len(new_spins) == new_neighbors.shape[0], f"Mismatch between spins and neighbors arrays: {len(new_spins)} != {new_neighbors.shape[0]}"
+    # assert np.all(new_neighbors[new_neighbors != -1] < len(new_spins)), f"Invalid neighbor indices: {new_neighbors[new_neighbors != -1]}"
+    # return new_spins, new_neighbors
+
+def simulate_growing_ising_model(spins:np.ndarray, neighbors:np.ndarray, coords:np.ndarray, evolve:np.ndarray, J:float, beta:float,
+                                 model:IsingModel) -> np.ndarray:
+    """
+    Simulate the Ising model with a growing branch.
+    """
+    
+    start_time = model.start_time
+    end_time = evolve.shape[0] - 1
+
+    results = {}
+    magn_results = defaultdict(list)
+    energy_results = defaultdict(list)
+
+    #G = convert_branch_coords_to_graph(coords, dist_thres=1.25)
+
+    for t in range(start_time, end_time+1):
+        print(f"Simulating branch at time {t}")
+        results[t] = []
+        
+        spins_collection, magn, energy = simulate(spins, neighbors, J, beta, model.n_equilib_steps, model.n_mcmc_steps, model.n_samples, model.n_sample_interval)
+            
+        # stack the spins
+        results[t] = spins_collection
+        magn_results[t] = magn
+        energy_results[t] = energy
+
+        original_spins = spins.copy()
+        # evolve the branch: take into account the case where stacked graph is used 
+        spins, neighbors = branch_evolve(spins, coords, evolve, t+1, dim_cross=model.dim_cross)
+
+        # assert that the first len(original_spins) spins are the same as the original spins
+        if model.dim_cross == 0:
+            assert np.all(spins[:len(original_spins)] == original_spins), "The first len(original_spins) spins are not the same as the original spins"
+        
+
+    return results, magn_results, energy_results
+
+def simulate_ising_model(model: IsingModel) -> IsingModel:
     """
     Perform the Metropolis algorithm for the Ising model.
     Includes visualization of spin configurations during the simulation.
@@ -152,28 +255,32 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000) -> IsingMo
     Returns:
         IsingModel: Final IsingModel object
     """
-    spins = model.spins
-    neighbors = model.neighbors
-    J = model.J
-    beta = model.beta
-
-    # set the equilibration steps and mcsteps
-    # set the mcsteps to 1000
-    equilibration_steps = n_iterations // 2
-    mcsteps = n_iterations - equilibration_steps
-    
+        
     start_time = time.time()
-    model.frames, model.magnetizations, model.energies = simulate(spins, neighbors, J, beta, equilibration_steps, mcsteps)
+    # simulate the growing branch if the branch_sim is not None
+    if model.coords is not None:
+        spins_collection, magn, energy = simulate_growing_ising_model(model.nodes, model.neighbors, model.coords, model.evolve, model.J, model.beta, model)
+        # in this case, the spins_collection is a dictionary with time as keys and spins 2d array as values
+        # magn and energy are 
+    else:
+        spins_collection, magn, energy = simulate(
+            spins = model.nodes, 
+            neighbors = model.neighbors, 
+            J = model.J, 
+            beta = model.beta, 
+            n_equilibration = model.n_equilib_steps, 
+            n_mcmc = model.n_mcmc_steps,
+            n_samples = model.n_samples,
+            n_sample_interval = model.n_sample_interval)
+        
     
     elapsed_time = time.time() - start_time
     print("Time taken: ", elapsed_time)
+    
 
-    model.spins_final = spins
-    model.energy_final = np.sum(model.energies) / np.size(model.energies)
-    model.magnetization_final = np.sum(model.magnetizations) / np.size(model.magnetizations)
-    print(f"Final energy: {model.energy_final}, Final magnetization: {model.magnetization_final}")
-    print(f"Amount of samples: {np.size(model.energies)}")
+    model.save_results(spins_collection, magn, energy)
 
+    # magn and energy have been averaged over a certain amount of samples
     return model
 
 def plot_graph(nodes:np.ndarray, neighbors:np.ndarray, ax=None, G=None, draw_edges=True):
@@ -271,7 +378,7 @@ def get_output_path(output_dir, model=None, params=None, prefix="ising", extensi
     filename = "_".join(components) + extension
     return os.path.join(output_dir, filename)
 
-def animate_ising_model(model: IsingModel, output_dir="output", T=None):
+def animate_ising_model(model: IsingModel, output_dir="output", animation_name=None, save_percent=10):
     """
     Animate the Ising model.
     Use the frames stored in model.frames.
@@ -281,148 +388,53 @@ def animate_ising_model(model: IsingModel, output_dir="output", T=None):
         output_dir: Directory where animation should be saved
     """
     # Create automatic filename
-    tree_params = {}
-    tree_params["iters"] = len(model.frames) * 100  # Multiply by frame save interval
-    model.temperature = T
-    plot_path = get_output_path(
-        output_dir=output_dir, 
-        model=model, 
-        params=tree_params,
-        prefix="animation", 
-        extension=".gif"
-    )
+    if animation_name is None:
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        plot_path = os.path.join(output_dir, f"ising_animation_{current_time}.gif")
+    else:
+        plot_path = os.path.join(output_dir, f"{animation_name}.gif")
     
     print("Saving animation...")
-    print(f"Number of frames: {len(model.frames)}")
+
+    ### use 10% of all the frames in the animation
+    total_frames = model.spins.shape[0]
+    n_frames = int(total_frames * (save_percent / 100))
+    step = total_frames // n_frames
+    frames = model.spins[::step]
+    print(f"Number of frames: {len(frames)}")
     
     # Convert spin arrays to image format first
     image_frames = []
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(15, 10))
     ax = fig.add_subplot(111)
     
     # Process each frame
-    for i, spin_array in enumerate(model.frames):
+    for i in tqdm(range(frames.shape[0])):
+        spin_array = frames[i]
         ax.clear()  # Clear previous frame
-        plot_graph(spin_array, model.neighbors, ax=ax, G=model.G)
+        if model.coords is not None:
+            plot_graph(spin_array, model.neighbors, ax=ax, G=model.G)
+        else:
+            plot_graph(spin_array, model.neighbors, ax=ax, G=model.G)
         
         # Add frame number to title
-        if T is not None:
-            ax.set_title(f'Ising Model Simulation - T={T} - Frame {i} / {len(model.frames)-1}')
-        else:
-            ax.set_title(f'Ising Model Simulation - Frame {i} / {len(model.frames)-1}')
+        ax.set_title(f'Ising Model Simulation - T={model.temp} - Frame {i} / {len(frames)}')
         
         # Render to image
         fig.canvas.draw()
         image = np.array(fig.canvas.buffer_rgba())
-        image_frames.append(image)
+        image_frames.append(Image.fromarray(image))
     
     plt.close(fig)
     
     # Create GIF with PIL
-    frames_pil = [Image.fromarray(frame) for frame in image_frames]
-    frames_pil[0].save(
+    image_frames[0].save(
         plot_path,
         save_all=True,
-        append_images=frames_pil[1:],
+        append_images=image_frames[1:],
         duration=100,  # Time between frames in milliseconds (faster)
         loop=0
     )
     print(f"Animation saved as '{plot_path}'")
+    plt.close()
 
-def simulate_ising_model_temps(temps: np.ndarray, nodes:np.ndarray, neighbors:np.ndarray, 
-                              J: float=1.0, n_iterations: int=10_000, output_dir=None):
-    """
-    Simulate the Ising model for a range of temperatures.
-    
-    Args:
-        temps: Array of temperatures to simulate
-        nodes: Initial node configuration
-        neighbors: Neighbor matrix
-        J: Coupling constant
-        n_iterations: Number of iterations per temperature
-        output_dir: Directory where plots should be saved
-    """
-    models = []
-    for temp in temps:
-        model = IsingModel(nodes=nodes, neighbors=neighbors, temperature=temp, J=J)
-        model = simulate_ising_model(model, n_iterations=n_iterations)
-        print(f"Final model energy: {model.energy_final}, Final model magnetization: {model.magnetization_final}")
-        models.append(model)
-    
-    # Create automatic filename
-    params = {
-        "temps": f"{temps.min():.1f}-{temps.max():.1f}",
-        "iters": n_iterations,
-        "J": J
-    }
-    if output_dir is not None:
-        plot_path = get_output_path(
-            output_dir=output_dir, 
-            params=params,
-            prefix="temp_sweep", 
-            extension=".png"
-        )
-    
-        # Plot the final energy and magnetization as a function of temperature
-        f = plt.figure(figsize=(18, 10))
-        sp = f.add_subplot(1, 2, 1)
-        sp.scatter(temps, [model.energy_final for model in models], color="IndianRed", marker="o", s=50)
-        sp.set_xlabel("Temperature")
-        sp.set_ylabel("Energy")
-        sp = f.add_subplot(1, 2, 2)
-        sp.scatter(temps, [model.magnetization_final for model in models], color="RoyalBlue", marker="o", s=50)
-        sp.set_xlabel("Temperature")
-        sp.set_ylabel("Magnetization")
-        plt.legend()
-        plt.savefig(plot_path)
-        
-        print(f"Temperature sweep plot saved as '{plot_path}'")
-        
-        plt.show()
-        plt.close()
-
-    # return the numeric results in a dataframe
-    results = pd.DataFrame({
-        "temperature": temps,
-        "energy": [model.energy_final for model in models],
-        "magnetization": [model.magnetization_final for model in models],
-    })
-    return results
-
-# Example usage
-if __name__ == "__main__":
-    pass
-    # # Define output directory
-    # output_dir = "variable_depth"
-    
-    #     # Temperature sweep
-    # temps = np.linspace(0.1, 4.0, 100)
-    # all_results = pd.DataFrame()
-    # for depth in range(3, 6):
-    #     tree = kTree(k=3, depth=depth)
-    #     nodes, neighbors = tree.construct_tree()
-    #     results = simulate_ising_model_temps(temps, nodes, neighbors, J=1.0, n_iterations=10_000)
-    #     results["depth"] = depth
-    #     results["k"] = 3
-    #     all_results = pd.concat([all_results, results])
-    # all_results.to_csv(f"{output_dir}/all_results.csv", index=False)
-
-    # # plot the results in a 3x3 grid
-    # f = plt.figure(figsize=(18, 10))
-    # sp = f.add_subplot(1, 2, 1)
-    # sp.scatter(all_results["temperature"], all_results["energy"], c=all_results["depth"], cmap="viridis", marker="o", s=50)
-    # sp.set_xlabel("Temperature")
-    # sp.set_ylabel("Energy")
-
-    # sp = f.add_subplot(1, 2, 2)
-    # sp.scatter(all_results["temperature"], all_results["magnetization"], c=all_results["depth"], cmap="viridis", marker="o", s=50)
-    # sp.set_xlabel("Temperature")
-    # sp.set_ylabel("Magnetization")
-
-    # f.colorbar(sp.collections[0], ax=sp)
-
-    # plt.show()
-    # plt.close()
-    
-
-    

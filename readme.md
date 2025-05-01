@@ -6,9 +6,36 @@ This code consist of 3 main steps:
 3. Analysis of the Ising model results (TO DO)
 
 To do:
-- fix the magnetization and energy calculations
-- Dimensional crossover
+- fix the magnetization and energy calculations -> DONE
+- Dimensional crossover 
 - Add branching in time
+
+- adding nodes, same as adjacent
+- make sure the branching in time also supports dimensional crossover
+- prerun some very large tmax simulations and save those coords and evolve arrays to file  
+- calculate correlation statistics 
+
+Pot. concerns:
+- Metropolis single flip suffers from critical slow down? -> Wolff algorithm (cluster flip algorithms)
+
+
+## Code
+
+Scripts illustrating various functionalities are located in scripts folder:
+- single_branch.py -> Run the ising model on a single branch at a certain time_step
+- growing_branch.py -> Run the ising model on an in time growing branch structure
+
+To Do:
+- Fix the dimensional crossover and have dimensional crossover on growing branch
+
+## optimizations
+To be able to save every spin configuration, save them as np.int8 -> single byte per site.
+
+
+## Experimentation
+
+Questions to answer:
+- 
 
 ## Results: Branching 
 
@@ -33,24 +60,6 @@ To do:
 <div align="center">
 <img src="output_grid/ising_simulation_temps_30x30_1.0_10000.png" alt="temp_stats" width="600">
 </div>
-
-## Background: The Ising model in physics
-
-The Ising model was first introduced in the 1920s by Ernest Ising, which concerns itself with the physics of phase transitions. More specifically the model was originally used to obtain a better understanding of ferromagnetism and especially "spontaneous magnetization".
-
-The first component of the Ising model is the topology structure. The classical starting point would be a 2D lattice with "wrap around" boundary conditions which turns it into a torus. Each lattice site is assigned an independent variable $\sigma_i$ for $i=1,...,N$.
-The independent variables $\sigma_i$ can be in 2 possible states, $\sigma_i = \pm 1$ reflecting the physical assumption that only 2 possibilities exist such as spin up/down(Potts model generalizes to multiple states). Assigning each lattice point a state gives us a configuration fo the system $(\sigma_1,..., \sigma_N)$.    
-
-A second component is called the *Hamiltonian* function which denotes the energy of a configuration $\sigma$. The Ising Hamiltoniain is formulated as follows:  
-
-```math
-H(\sigma) = -\sum_{\langle i,j\rangle} J_{i,j} \sigma_i \sigma_j - \mu \sum
-```
-
-
-
-
-
 
 
 ## Requirements
