@@ -29,13 +29,26 @@ To Do:
 - Fix the dimensional crossover and have dimensional crossover on growing branch
 
 ## optimizations
-To be able to save every spin configuration, save them as np.int8 -> single byte per site.
-
+To be able to save every spin configuration, save them as np.int8 -> single byte per site.  
+Using numba and just in time compiling.  
+- Transform the simulation code to numba compatible code.
 
 ## Experimentation
 
 Questions to answer:
-- 
+- Is there a periodic pattern in the MCMC Steps
+- Cross dimensionality but also in other direction, to approach a circular 3D tube
+- Initialisation impact
+
+
+## Benchmarking
+orignal -> no njit usage   
+mod_1 -> njit subroutine 1 and subroutine 2  
+
+There are discrepancies between the optimised code and the original code which eventually leads to different branching structures 
+
+## Other considerations
+3D model should actually be a tube where cells live in the tube wall. 
 
 ## Results: Branching 
 

@@ -56,7 +56,7 @@ def graph_to_model_format(G:nx.Graph) -> tuple[np.ndarray, np.ndarray]:
     return spins, neighbors
 
 
-def dimensional_crossover(graph: nx.Graph, n_layers: int, pos_offset: int=150) -> nx.Graph:
+def dimensional_crossover(graph: nx.Graph, n_layers: int, pos_offset: int=100) -> nx.Graph:
     """
     Stack n_layers copies of the input graph, connecting corresponding nodes between layers.
     Each node is named as (original_node, layer) and has a 'level' attribute.
@@ -112,11 +112,14 @@ def plot_stacked_graph(graph, level_offset=20):
     plt.show()
 
 
-def plot_magn_energy(magn: np.ndarray|list, energy: np.ndarray|list, temps: np.ndarray|list, save_path:str=None, show: bool=True):
+def plot_magn_energy(magn: np.ndarray|list, energy: np.ndarray|list, temps: np.ndarray|list, save_path:str=None, show: bool=True, title:str=None):
     """
     Plot the magnetization and energy as a function of temperature
     """
     plt.figure(figsize=(20, 10))
+    # add a title to the figure if it is provided
+    if title is not None:
+        plt.suptitle(title)
     sp = plt.subplot(1, 2, 1)
     sp.scatter(temps, energy, label='energy', marker='o', color="IndianRed")
     sp.set_xlabel("Temperature")

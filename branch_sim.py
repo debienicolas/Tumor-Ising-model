@@ -35,9 +35,14 @@ np.random.seed(43)
 ### tissue 1 subroutines as numba methods ###
 
 
-@njit
-def subroutine_1(index_rnr, j, skip, coordinates, node, min_branch, lstep):
+
+def subroutine_1(index_rnr, coordinates, node, min_branch, lstep, fchem, prob_branch):
+
     np.random.seed(43)
+    
+    skip = 0 
+
+
     for j in range(len(index_rnr)):
         coord_temp = np.append(coordinates,np.array(node),axis=0)
         # highest tree label of existing nodes
@@ -78,33 +83,43 @@ def subroutine_1(index_rnr, j, skip, coordinates, node, min_branch, lstep):
     
     return node, angle
 
+
 @njit
 def subroutine_2(node, coordinates, angle, node_temp, radavoid, fav):
-    for j in range(len(node)):
+    """
+    node, coordinates and angle are all np.ndarrays
+    """
+    for j in range(node.shape[0]):
         # self-avoidance rules (apply only if there is avoidance potential):
         if fav!=0:
             tip = node[j]
 
             # determine the distances between the active tip and inactive nodes
-            dist = np.add(tip,-coordinates)
+            dist = np.empty_like(coordinates, dtype=np.float32)
+            for k in range(coordinates.shape[0]):
+                for m in range(tip.shape[0]):
+                    dist[k,m] = tip[m]-coordinates[k,m]
 
             # ignore distances between active tip and parent nodes, as well as within the same duct and sister branches
-            for k in range(len(dist)):
+            for k in range(dist.shape[0]):
                 if tip[-2]==coordinates[k,-1] or tip[-1]==coordinates[k,-1] or tip[-2]==coordinates[k,-2]:
-                    dist[k] = [0,0,0,0]
+                    for m in range(dist.shape[1]):
+                        dist[k,m] = 0.0
+
                 # ignore distances above avoidance potential
                 norm = LA.norm(dist[k][:2])
                 if norm > radavoid:
-                    dist[k] = [0,0,0,0]
-
+                    for m in range(dist.shape[1]):
+                        dist[k,m] = 0.0
+            
             # sum of the distances within radavoid for the active tip
             dist_sum = np.sum(dist[:,:2],axis=0)
             # normalized vector and the final displacement vector weighted by a factor 'fav'
             norm_dis = LA.norm(dist_sum)
+            displace = np.zeros(2, dtype=np.float32)
             if norm_dis > 0:
-                displace = dist_sum/norm_dis
-            else:
-                displace = np.array([0,0], dtype=np.float32)
+                displace[0] = dist_sum[0]/norm_dis
+                displace[1] = dist_sum[1]/norm_dis
 
             pol = -fav*displace
 
@@ -131,10 +146,102 @@ def subroutine_2(node, coordinates, angle, node_temp, radavoid, fav):
 
     return node, angle
 
+@njit
+def get_recent_coords(coordinates, evolve):
+    """
+    Get the indices of the recent coordinates in the coordinates array
+    """
+    n_elems = np.int32(np.sum(evolve[-2:]))
+    start_idx = max(0, len(coordinates) - n_elems)
+    
+    # Initialize array of indices
+    indices = np.arange(start_idx, len(coordinates), dtype=np.int32)
+    
+    return indices
+
+@njit
+def subroutine_3(node,coordinates,recent_indices, angle, cutoff):
+    
+    skipp = 0
+    
+    for j in range(len(node)):
+        #tip = np.array(node[j-skipp])
+        tip = node[j-skipp]
+        once = 0
+
+        # end loop if there are no active tips left         
+        if len(node)==0:
+            break
+        
+        # annihilation due to active tip-passive node contact
+        for i, item in enumerate(coordinates):
+            radius = distance(item[:2],tip[:2])
+            # exclude nodes from the same duct, from the parent ..
+            # ..if these nodes were generated in the last 2 time steps
+
+            ## check if the item is in the checklist
+            is_recent = False
+            for idx in recent_indices:
+                if idx == i:
+                    is_recent = True
+                    break
+
+            if is_recent:
+                if item[-1]!=tip[-1] and item[-1]!=tip[-2]:
+                    if 0<radius<cutoff:
+                        # create new arrays instead of using np.delete
+                        node = np.concatenate((node[:j-skipp], node[j-skipp+1:]))
+                        angle = np.concatenate((angle[:j-skipp], angle[j-skipp+1:]))
+                        #node = np.delete(node,j-skipp,0)
+                        #angle = np.delete(angle,j-skipp,0)
+                        once = 1
+                        skipp += 1
+            elif 0<radius<cutoff:
+                node = np.concatenate((node[:j-skipp], node[j-skipp+1:]))
+                angle = np.concatenate((angle[:j-skipp], angle[j-skipp+1:]))    
+                #node = np.delete(node,j-skipp,0)
+                #angle = np.delete(angle,j-skipp,0)
+                once = 1
+                skipp += 1
+            if once==1:
+                break     
+    
+    return node, angle 
+
+@njit(fastmath=True)
+def distance(vect, tip):
+    diff = np.add(vect[:2],-tip[:2])
+    distance = LA.norm(diff)
+    return distance
+
+@njit(fastmath=True)
+def prob_list(x,f,pb):
+    # bias for forward steps
+    alpha = np.float32(max(0, min(1, (1-f*np.sin(x))/2)))
+    # bias for backward steps 
+    beta = np.float32(max(0, min(1, (1+f*np.sin(x))/2)))
+
+    # list of stepping probabilities:
+    problist = np.array([(1-pb)*alpha,(1-pb)*beta,pb*alpha,pb*beta], dtype=np.float32)
+    # 'cumulative' probabilities of the list
+    cum_prob = np.zeros(len(problist)+1, dtype=np.float64)
+    for j in range(len(problist)):
+        cum_prob[j+1] = cum_prob[j] + problist[j]
+    
+    return cum_prob
+
+@njit(fastmath=True)
+def compute_probabilities(angle_values, fchem, prob_branch):
+    radians = np.radians(angle_values)
+    result = np.empty((len(radians), 5), dtype=np.float64)
+    for i in range(radians.shape[0]):
+        result[i] = prob_list(radians[i], fchem, prob_branch)
+    return result
+
 
 class MamSimulation:
 
-    def __init__(self, tmax=150):
+    def __init__(self, tmax=150, prob_branch=0.03, fav=-0.1, fchem=0.6, graph_output=True):
         np.random.seed(43)
         self.Lx = 200
         self.Lz = 300
@@ -142,6 +249,10 @@ class MamSimulation:
         self.min_branch = pi/10
         self.cutoff = 1.5*self.lstep
         self.radavoid = 10*self.lstep
+
+        self.prob_branch = prob_branch
+        self.fav = fav
+        self.fchem = fchem
 
         self.node = np.array([[0,self.Lz/2,0,1]], dtype=np.float32)
         self.angle = np.array([0.0], dtype=np.float32)
@@ -151,47 +262,30 @@ class MamSimulation:
         self.coordinates = self.node
 
         self.tmax = tmax
+        self.graph_output = graph_output
+    # prob_branch: probability of branching
+    # fav: favorability of self-avoidance
+    # fchem: favorability of chemical guidance -> influences directional bias of branch growth
+    def tissue1(self,prob_branch:float,fav:float,fchem:float):
         
-    
-    def distance(self, vect, tip):
-        diff = np.add(vect[:2],-tip[:2])
-        distance = LA.norm(diff)
-        return distance
-
-    def prob_list(self,x,f,pb):
-        # bias for forward steps
-        alpha = np.float32((1-f*np.sin(x))/2)
-        if alpha < 0: alpha = np.float32(0)
-        if alpha > 1: alpha = np.float32(1)
-        # bias for backward steps 
-        beta = np.float32((1+f*np.sin(x))/2)
-        if beta < 0: beta = np.float32(0)
-        if beta > 1: beta = np.float32(1)
-
-        # list of stepping probabilities:
-        problist = np.array([(1-pb)*alpha,(1-pb)*beta,pb*alpha,pb*beta])
-        # 'cumulative' probabilities of the list
-        cum_prob = [0]+[sum(problist[:j+1]) for j in range(len(problist))]
-        
-        probs = {'problist':problist,'cumulative':np.array(cum_prob)}
-        
-        return probs
-    
-    def tissue1(self,prob_branch,fav,fchem):
-    
-        skip =0 
+        skip = 0 
 
         # draw random numbers to decide on next jumps:
         rnr = np.random.rand(len(self.angle))
         
         # determine the cumulative distribution of the stepping probabilities:
         # (use angle values from the local angle list to impose parallel field as guidance)
-        cumprob = np.array([self.prob_list(np.radians(item),fchem,prob_branch)['cumulative'] for item in self.angle_list[-(len(self.angle)):,0]])
+        angle_slice = self.angle_list[-(len(self.angle)):,0]
+        cumprob = compute_probabilities(angle_slice, fchem, prob_branch)
+        ###cumprob = np.array([prob_list(np.radians(item),fchem,prob_branch)for item in self.angle_list[-(len(self.angle)):,0]])
+        
         # determine the first entry of cumprob that is larger than rnr, and take the entry before that:
         index_rnr = np.array([np.where(cumprob[j]>rnr[j])[0][0]-1 for j in range(len(rnr))])
 
         node_temp = self.coordinates[-int(self.evolve[-1]):]
 
+        #self.node, self.angle = subroutine_1(index_rnr, self.coordinates, self.node, self.min_branch, self.lstep, fchem, prob_branch)
+        
         for j in range(len(index_rnr)):
             coord_temp = np.append(self.coordinates,np.array(self.node),axis=0)
             # highest tree label of existing nodes
@@ -233,96 +327,102 @@ class MamSimulation:
         # Make a list of local angle (\varphi) values BEFORE avoidance or guidance:
         self.angle = (self.angle+pi) % (2*pi) - pi 
         
-        #self.node, self.angle = subroutine_2(self.node,self.coordinates,self.angle,node_temp,self.radavoid,fav)
-        for j in range(len(self.node)):
+        assert isinstance(self.node, np.ndarray)
+        assert isinstance(self.angle, np.ndarray)
+        assert isinstance(self.coordinates, np.ndarray)
+        self.node, self.angle = subroutine_2(self.node.astype(np.float32),self.coordinates.astype(np.float32),self.angle.astype(np.float32),node_temp.astype(np.float32),self.radavoid,fav)
+        # for j in range(len(self.node)):
             
-            # self-avoidance rules (apply only if there is avoidance potential):
-            if fav!=0:
-                tip = self.node[j]
+        #     # self-avoidance rules (apply only if there is avoidance potential):
+        #     if fav!=0:
+        #         tip = self.node[j]
 
-                # determine the distances between the active tip and inactive nodes
-                dist = np.add(tip,-self.coordinates)
+        #         # determine the distances between the active tip and inactive nodes
+        #         dist = np.add(tip,-self.coordinates)
 
-                # ignore distances between active tip and parent nodes, as well as within the same duct and sister branches
-                for k in range(len(dist)):
-                    if tip[-2]==self.coordinates[k,-1] or tip[-1]==self.coordinates[k,-1] or tip[-2]==self.coordinates[k,-2]:
-                        dist[k] = [0,0,0,0]
-                    # ignore distances above avoidance potential
-                    norm = LA.norm(dist[k][:2])
-                    if norm > self.radavoid:
-                        dist[k] = [0,0,0,0]
+        #         # ignore distances between active tip and parent nodes, as well as within the same duct and sister branches
+        #         for k in range(len(dist)):
+        #             if tip[-2]==self.coordinates[k,-1] or tip[-1]==self.coordinates[k,-1] or tip[-2]==self.coordinates[k,-2]:
+        #                 dist[k] = [0,0,0,0]
+        #             # ignore distances above avoidance potential
+        #             norm = LA.norm(dist[k][:2])
+        #             if norm > self.radavoid:
+        #                 dist[k] = [0,0,0,0]
 
-                # sum of the distances within radavoid for the active tip
-                dist_sum = np.array(np.sum(dist[:,:2],axis=0))
-                # normalized vector and the final displacement vector weighted by a factor 'fav'
-                norm_dis = LA.norm(dist_sum)
-                if norm_dis > 0:
-                    displace = np.array(dist_sum/norm_dis)
-                else:
-                    displace = np.array([0,0])
+        #         # sum of the distances within radavoid for the active tip
+        #         dist_sum = np.array(np.sum(dist[:,:2],axis=0))
+        #         # normalized vector and the final displacement vector weighted by a factor 'fav'
+        #         norm_dis = LA.norm(dist_sum)
+        #         if norm_dis > 0:
+        #             displace = np.array(dist_sum/norm_dis)
+        #         else:
+        #             displace = np.array([0,0])
 
-                pol = -fav*displace
+        #         pol = -fav*displace
 
-                tip[0] += pol[0]
-                tip[1] += pol[1]
+        #         tip[0] += pol[0]
+        #         tip[1] += pol[1]
 
-                for k in range(len(node_temp)):
-                    # filter only displaced nodes
-                    if pol[0]!=0 and pol[1]!=0:
-                        # calculate distance between the displaced node and its previous instance or its parent
-                        if tip[-1]==node_temp[k][-1] or tip[-2]==node_temp[k][-1]:
-                            displace_more = np.add(tip[:2],-node_temp[k][:2])
-                            normalize = LA.norm(displace_more)                    
-                            # update node coordinates s.t. normalized distance from previous instance is = 1                    
-                            self.node[j][0] = node_temp[k][0]+displace_more[0]/normalize
-                            self.node[j][1] = node_temp[k][1]+displace_more[1]/normalize
-                            # update the angle of the displaced node
-                            ydis = self.node[j][1]-node_temp[k][1]
-                            xdis = self.node[j][0]-node_temp[k][0]
-                            if xdis<0:
-                                self.angle[j] = pi + np.arctan(ydis/xdis)
-                            else:
-                                self.angle[j] = np.arctan(ydis/xdis)
+        #         for k in range(len(node_temp)):
+        #             # filter only displaced nodes
+        #             if pol[0]!=0 and pol[1]!=0:
+        #                 # calculate distance between the displaced node and its previous instance or its parent
+        #                 if tip[-1]==node_temp[k][-1] or tip[-2]==node_temp[k][-1]:
+        #                     displace_more = np.add(tip[:2],-node_temp[k][:2])
+        #                     normalize = LA.norm(displace_more)                    
+        #                     # update node coordinates s.t. normalized distance from previous instance is = 1                    
+        #                     self.node[j][0] = node_temp[k][0]+displace_more[0]/normalize
+        #                     self.node[j][1] = node_temp[k][1]+displace_more[1]/normalize
+        #                     # update the angle of the displaced node
+        #                     ydis = self.node[j][1]-node_temp[k][1]
+        #                     xdis = self.node[j][0]-node_temp[k][0]
+        #                     if xdis<0:
+        #                         self.angle[j] = pi + np.arctan(ydis/xdis)
+        #                     else:
+        #                         self.angle[j] = np.arctan(ydis/xdis)
 
-        # tip annihilation condition:
-        skipp = 0
 
         # list of recent nodes generated in the last 2 time steps
-        checklist = [list(item) for item in self.coordinates[-int(np.sum(self.evolve[-2:])):]]
+        recent_indices = get_recent_coords(self.coordinates, self.evolve)
+        self.node, self.angle = subroutine_3(self.node,self.coordinates,recent_indices,self.angle,self.cutoff)
 
-        for j in range(len(self.node)):
-            tip = np.array(self.node[j-skipp])
-            once = 0
+        # # tip annihilation condition:
+        # skipp = 0
+        
+        # for j in range(len(self.node)):
+        #     tip = np.array(self.node[j-skipp])
+        #     once = 0
 
-            # end loop if there are no active tips left         
-            if len(self.node)==0:
-                break
+        #     # end loop if there are no active tips left         
+        #     if len(self.node)==0:
+        #         break
 
-            # annihilation due to active tip-passive node contact
-            for item in self.coordinates:
-                radius = self.distance(item[:2],tip[:2])
-                # exclude nodes from the same duct, from the parent ..
-                # ..if these nodes were generated in the last 2 time steps
-                if list(item) in checklist:
-                    if item[-1]!=tip[-1] and item[-1]!=tip[-2]:
-                        if 0<radius<self.cutoff:
-                            self.node = np.delete(self.node,j-skipp,0)
-                            self.angle = np.delete(self.angle,j-skipp,0)
-                            once = 1
-                            skipp += 1
-                elif 0<radius<self.cutoff:
-                    self.node = np.delete(self.node,j-skipp,0)
-                    self.angle = np.delete(self.angle,j-skipp,0)
-                    once = 1
-                    skipp += 1
-                if once==1:
-                    break     
+        #     # annihilation due to active tip-passive node contact
+        #     for item in self.coordinates:
+        #         radius = distance(item[:2],tip[:2])
+        #         # exclude nodes from the same duct, from the parent ..
+        #         # ..if these nodes were generated in the last 2 time steps
+        #         if list(item) in checklist:
+        #             if item[-1]!=tip[-1] and item[-1]!=tip[-2]:
+        #                 if 0<radius<self.cutoff:
+        #                     self.node = np.delete(self.node,j-skipp,0)
+        #                     self.angle = np.delete(self.angle,j-skipp,0)
+        #                     once = 1
+        #                     skipp += 1
+        #         elif 0<radius<self.cutoff:
+        #             self.node = np.delete(self.node,j-skipp,0)
+        #             self.angle = np.delete(self.angle,j-skipp,0)
+        #             once = 1
+        #             skipp += 1
+        #         if once==1:
+        #             break     
 
         # save the length of node vector (to track node evolution over time)
         self.evolve = np.append(self.evolve,len(self.node))
 
         # set angle values to be within [-pi,pi]
         self.angle = (self.angle+pi) % (2*pi) - pi     
+
         # save the angles of nodes [in degrees!] including the generation number
         self.angle_list = np.append(self.angle_list,np.column_stack((np.degrees(self.angle),self.node[:,-1])),axis=0)
 
@@ -338,7 +438,7 @@ class MamSimulation:
             if t<5 and len(self.node)>1:
                 break
             if len(self.node)!=0:
-                self.tissue1(0.03,-0.1,0.6)
+                self.tissue1(self.prob_branch,self.fav,self.fchem)
             if len(self.node) == 0:
                 break
         end_time = time.time()
@@ -354,7 +454,7 @@ class MamSimulation:
         print(f"Branch growth simulation completed in {end_time - start_time} seconds")
 
         # create the graph of the final network
-        G = convert_branch_coords_to_graph(self.coordinates)
+        G = convert_branch_coords_to_graph(self.coordinates) if self.graph_output else None
 
         return self.coordinates, self.evolve, G
 
@@ -362,19 +462,31 @@ class MamSimulation:
 
 if __name__ == "__main__":
 
-    from utils.branch_sim_utils import branch_growth_animation
+    from utils.branch_sim_utils import branch_growth_animation, plot_branch_network
 
 
 
     tmax = 150
-    mam = MamSimulation(tmax=tmax)
+    mam = MamSimulation(tmax=tmax, graph_output=False)
     coordinates, evolve, G = mam.simulate()
-    #branch_growth_animation(coordinates, evolve, f"branch_growth_{tmax}.gif")
 
-    # print coordinates with x between 15 and 17
-    print(coordinates[np.where((coordinates[:,0] > 15) & (coordinates[:,0] < 17))])
+    plot_branch_network(coordinates, evolve, end_time=1000)
+    if tmax == 150:
+        # load the test coordinates and evolve
+        coordinates_test = np.load("coordinates_150_test.npy")
+        evolve_test = np.load("evolve_150_test.npy")
 
-    # plot the graph
-    fig, ax = plt.subplots(figsize=(15,15))
-    nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, node_size=10, ax=ax)
-    plt.show()
+        # compare the coordinates and evolve, check if all elements are the same
+        print(f"Coordinates match: {np.allclose(coordinates, coordinates_test)}")
+        print(f"Largest difference: {np.max(np.abs(coordinates - coordinates_test))}")
+        print("Difference distributions:")
+        print(np.histogram(np.abs(coordinates - coordinates_test), bins=10))
+        print(f"Evolve match: {np.allclose(evolve, evolve_test)}")
+
+        # check the shapes 
+        print(f"Coordinates shape match: {coordinates.shape == coordinates_test.shape}")
+        print(f"Branch naming match: {np.all(coordinates[:, 2:] == coordinates_test[:,2:])}")
+
+    
+
+

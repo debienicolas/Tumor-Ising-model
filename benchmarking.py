@@ -8,7 +8,7 @@ from tqdm import tqdm
 import numba
 from PIL import Image
 import pandas as pd
-
+import os
 # Create undecorated versions of all functions
 def set_seed_impl(seed:int):
     """
@@ -333,3 +333,8 @@ if __name__ == "__main__":
     plt.ylabel("Elapsed Time")
     plt.savefig("ising_benchmark.png")
     plt.show()
+
+    # save the results to a csv file
+    output_dir = os.path.join("bench_output", "ising_model")
+    os.makedirs(output_dir, exist_ok=True)
+    df.to_csv(os.path.join(output_dir, "ising_model_benchmark.csv"), index=False)

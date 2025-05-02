@@ -10,3 +10,10 @@ output_dim
 
 # ignore output_directories
 output_*
+
+branching_mojo/
+
+# mlflow stuff
+mlartifacts/
+mlruns/
+bench_output/

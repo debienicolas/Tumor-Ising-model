@@ -20,7 +20,7 @@ from utils.gen_utils import graph_to_model_format, dimensional_crossover, plot_m
 from main_tree import IsingModel, simulate_ising_model, animate_ising_model, plot_graph
 
 
-n_layers = 3
+n_layers = 2
 
 output_dir = f"output_dim_cross/{n_layers}_layers"
 os.makedirs(output_dir, exist_ok=True)
@@ -87,5 +87,5 @@ for T in temps:
     magnetization.append(model.total_magn)
     energy.append(model.total_energy)
 
-
-plot_magn_energy(magnetization, energy, temps, save_path=os.path.join(output_dir, f"n_mcmc{n_mcmc_steps}_n_samples{n_samples}_J{J}_global_stats.png"), show=True)
+title = f"n_layers={n_layers}, n_mcmc={n_mcmc_steps}, n_samples={n_samples}"
+plot_magn_energy(magnetization, energy, temps, save_path=os.path.join(output_dir, f"n_mcmc{n_mcmc_steps}_n_samples{n_samples}_J{J}_global_stats.png"), show=True, title=title)

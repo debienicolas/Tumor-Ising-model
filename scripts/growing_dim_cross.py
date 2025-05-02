@@ -25,9 +25,9 @@ n_layers = 3
 output_dir = f"output_growing_dim_cross/{n_layers}_layers"
 os.makedirs(output_dir, exist_ok=True)
 
-t_start = 10
+t_start = 25
 tmax = 100
-T = 4.0
+T = 1.5
 J = 1.0
 n_equilib_steps = 1_000
 n_mcmc_steps = 1_000
@@ -83,7 +83,7 @@ from PIL import Image
 from utils.branch_sim_utils import convert_branch_coords_to_graph
 # Convert spin arrays to image format first
 image_frames = []
-fig = plt.figure(figsize=(10, 10))
+fig = plt.figure(figsize=(15, 10))
 ax = fig.add_subplot(111)
 
 # Process each frame

@@ -19,12 +19,12 @@ output_dir = "output_mam"
 os.makedirs(output_dir, exist_ok=True)
 
 ## set parameters ##
-tmax = 150
+tmax = 300
 T = 0.5
 J = 1.0
 n_equilib_steps = 1_000
 n_mcmc_steps = 1_000
-n_samples = 10
+n_samples = 30
 
 
 
@@ -94,6 +94,6 @@ plt.savefig(os.path.join(output_dir, f"n_mcmc{n_mcmc_steps}_n_samples{n_samples}
 plt.show()
 plt.close()
 
-
-plot_magn_energy(magnetizations, energies, temps, save_path=os.path.join(output_dir, f"n_mcmc{n_mcmc_steps}_n_samples{n_samples}_J{J}_global_stats.png"), show=True)
+title = f"n_layers=1, n_mcmc={n_mcmc_steps}, n_samples={n_samples}, J={J}"
+plot_magn_energy(magnetizations, energies, temps, save_path=os.path.join(output_dir, f"n_mcmc{n_mcmc_steps}_n_samples{n_samples}_J{J}_global_stats.png"), show=True, title=title)
 

@@ -15,13 +15,14 @@ import pandas as pd
 from branch_sim import MamSimulation
 from scipy.spatial import KDTree
 from collections import defaultdict
+from numba import prange
 
 from utils.gen_utils import graph_to_model_format
 from utils.branch_sim_utils import convert_branch_coords_to_graph, model_format_at_time
 from IsingModel import IsingModel 
 
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True)
 def calc_neighbor_sum(i:int, spins:np.ndarray, neighbors:np.ndarray) -> float:
     """
     Calculate the sum of the neighbors of node i.
@@ -32,7 +33,7 @@ def calc_neighbor_sum(i:int, spins:np.ndarray, neighbors:np.ndarray) -> float:
     result = np.sum(spins[node_neigh[node_neigh != -1]])
     return result
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True, parallel=True)
 def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
     """
     Calculate the Hamiltonian of the system.
@@ -49,14 +50,14 @@ def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
         print("Zero Hamiltonian detected")
     return H / 2
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True)
 def calc_magnetization(spins:np.ndarray) -> float:
     """
     Calculate the magnetization of the system.
     """
     return np.abs(np.sum(spins)/spins.size)
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True)
 def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int) -> float:
     """
     Calculate the energy difference of flipping a spin.
@@ -64,7 +65,7 @@ def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int) -> 
     neighbors_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
     return 2 * J * spins[i] * neighbors_sum
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True)
 def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: float) -> np.ndarray:
     """
     Perform a single Metropolis step on a randomly chosen spin.
@@ -86,7 +87,7 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
             spins[i] *= -1
     return spins
 
-@numba.njit(nopython=True)
+@numba.njit(nopython=True, fastmath=True)
 def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mcmc:int, n_samples:int, n_sample_interval:int) -> np.ndarray:
     """
     Simulate the Ising model.
@@ -130,7 +131,7 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
 
 
 
-def branch_evolve(spins:np.ndarray, coords:np.ndarray, evolve:np.ndarray, time_step:int, dist_thres:float=1.5, dim_cross:bool=False) -> np.ndarray:
+def branch_evolve(spins:np.ndarray, coords:np.ndarray, evolve:np.ndarray, time_step:int, dist_thres:float=1.5, dim_cross:int=1) -> np.ndarray:
     """
     Evolve the branch by adding more nodes to the tips
     This is not the most efficient way to do this, but is good for now
@@ -150,7 +151,7 @@ def branch_evolve(spins:np.ndarray, coords:np.ndarray, evolve:np.ndarray, time_s
     
     nodes, neighbors = model_format_at_time(next_coords, evolve, time_step, dim_cross=dim_cross)
 
-    if dim_cross == 0:
+    if dim_cross == 1:
         # update the spins of the current nodes -> spins maintained for the current branch
         nodes[:len(spins)] = spins
     else:
@@ -236,7 +237,7 @@ def simulate_growing_ising_model(spins:np.ndarray, neighbors:np.ndarray, coords:
         spins, neighbors = branch_evolve(spins, coords, evolve, t+1, dim_cross=model.dim_cross)
 
         # assert that the first len(original_spins) spins are the same as the original spins
-        if model.dim_cross == 0:
+        if model.dim_cross == 1:
             assert np.all(spins[:len(original_spins)] == original_spins), "The first len(original_spins) spins are not the same as the original spins"
         
 

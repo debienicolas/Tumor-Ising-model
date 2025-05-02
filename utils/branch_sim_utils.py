@@ -34,7 +34,7 @@ def convert_branch_coords_to_graph(coordinates:np.ndarray, dist_thres:float=1.25
             if coordinates[i,3] == coordinates[j,3] or coordinates[i,3] == coordinates[j,2]:    
                 if np.linalg.norm(coordinates[i,0:2] - coordinates[j,0:2]) < dist_thres:
                     G.add_edge(i, j)
-    if dim_cross > 0:
+    if dim_cross > 1:
         G = dimensional_crossover(G, dim_cross)
     return G
 
@@ -117,9 +117,9 @@ def plot_branch_graph(G:nx.Graph, save_path=None, show:bool=True, node_colors=No
     elif show:
         plt.show()
     plt.close()
-    return ax
+    return fig
 
-def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None, show:bool=True, save_path=None) -> Axes:
+def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None, show:bool=True, save_path=None, title:str=None) -> Axes:
     """
     Plots the branch coordinates.
 
@@ -134,6 +134,8 @@ def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None
         ax: 
     """
     fig, ax = plt.subplots(figsize=(10,10))
+    if title:
+        fig.suptitle(title)
     ms = 1.5
 
     if end_time is None:

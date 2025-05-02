@@ -23,7 +23,7 @@ class IsingModel:
     evolve:np.ndarray | None = None
     start_time:int = 100
     save_frames:bool = True
-    dim_cross:int = 0
+    dim_cross:int = 1
 
     @property
     def beta(self):
