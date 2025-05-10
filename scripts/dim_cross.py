@@ -31,7 +31,7 @@ T = 0.5
 J = 1.0
 n_equilib_steps = 1_000
 n_mcmc_steps = 1_000
-n_samples = 10
+n_samples = 50
 
 
 # generate the branch

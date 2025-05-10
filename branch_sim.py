@@ -241,8 +241,8 @@ def compute_probabilities(angle_values, fchem, prob_branch):
 
 class MamSimulation:
 
-    def __init__(self, tmax=150, prob_branch=0.03, fav=-0.1, fchem=0.6, graph_output=True):
-        np.random.seed(43)
+    def __init__(self, tmax=150, prob_branch=0.03, fav=-0.1, fchem=0.6, graph_output=True, seed=43):
+        np.random.seed(seed)
         self.Lx = 200
         self.Lz = 300
         self.lstep = 1
@@ -460,32 +460,83 @@ class MamSimulation:
 
 
 
+def generate_branches(tmax, seeds: list[int], prob_branch:float, fav:float, fchem:float):
+    output_folder = "output/branch_structures"
+    os.makedirs(output_folder, exist_ok=True)
+
+    # create the subfolder for the current parameters
+    subfolder = os.path.join(output_folder, f"prob_branch={prob_branch}_fav={fav}_fchem={fchem}_tmax={tmax}")
+    os.makedirs(subfolder, exist_ok=True)
+
+    for seed in tqdm(seeds):
+        mam = MamSimulation(tmax=tmax, prob_branch=prob_branch, fav=fav, fchem=fchem, graph_output=False, seed=seed)
+        coordinates, evolve, G = mam.simulate()
+        np.save(os.path.join(subfolder, f"coordinates_{seed}.npy"), coordinates)
+        np.save(os.path.join(subfolder, f"evolve_{seed}.npy"), evolve)
+    
+    print(f"Generated {len(seeds)} branches with parameters: prob_branch={prob_branch}, fav={fav}, fchem={fchem}, tmax={tmax}")
+    return
+
+
+
 if __name__ == "__main__":
 
-    from utils.branch_sim_utils import branch_growth_animation, plot_branch_network
+
+    seeds = list(range(50))
+    generate_branches(tmax=500, seeds=seeds, prob_branch=0.03, fav=-0.1, fchem=0.6)
+    # from utils.branch_sim_utils import branch_growth_animation, plot_branch_network
+
+    # tmax = 150
+    # mam = MamSimulation(tmax=tmax, graph_output=False)
+    # coordinates, evolve, G = mam.simulate()
+
+
+    # # I want to define a subgraph of the final graph based on a square region drawn in space
+    # # the square should be centered in the middle of the final graph
+    # # in the middle of x direction and about 0.5 of width
+    # # in the middle of y direction and about 0.8
+
+    # width = np.max(coordinates[:,0]) - np.min(coordinates[:,0])
+    # height = np.max(coordinates[:,1]) - np.min(coordinates[:,1])
+
+    # # get the center of the graph
+    # center_x = np.min(coordinates[:,0]) + width/2
+    # center_y = np.min(coordinates[:,1]) + height/2
+
+    # # define the square
+    # square_width = 0.5*width
+    # square_height = 0.8*height
+
+    # square_x_min = center_x - square_width/2
+    # square_x_max = center_x + square_width/2
+    # square_y_min = center_y - square_height/2
+    # square_y_max = center_y + square_height/2
 
 
 
-    tmax = 150
-    mam = MamSimulation(tmax=tmax, graph_output=False)
-    coordinates, evolve, G = mam.simulate()
+    # ax = plot_branch_network(coordinates, evolve, end_time=1000, show=False)
+    # ax.plot([square_x_min, square_x_max, square_x_max, square_x_min, square_x_min],
+    #          [square_y_min, square_y_min, square_y_max, square_y_max, square_y_min],
+    #          color='red')
+    # plt.show()
+    
 
-    plot_branch_network(coordinates, evolve, end_time=1000)
-    if tmax == 150:
-        # load the test coordinates and evolve
-        coordinates_test = np.load("coordinates_150_test.npy")
-        evolve_test = np.load("evolve_150_test.npy")
+    # plot_branch_network(coordinates, evolve, end_time=1000)
+    # if tmax == 150:
+    #     # load the test coordinates and evolve
+    #     coordinates_test = np.load("coordinates_150_test.npy")
+    #     evolve_test = np.load("evolve_150_test.npy")
 
-        # compare the coordinates and evolve, check if all elements are the same
-        print(f"Coordinates match: {np.allclose(coordinates, coordinates_test)}")
-        print(f"Largest difference: {np.max(np.abs(coordinates - coordinates_test))}")
-        print("Difference distributions:")
-        print(np.histogram(np.abs(coordinates - coordinates_test), bins=10))
-        print(f"Evolve match: {np.allclose(evolve, evolve_test)}")
+    #     # compare the coordinates and evolve, check if all elements are the same
+    #     print(f"Coordinates match: {np.allclose(coordinates, coordinates_test)}")
+    #     print(f"Largest difference: {np.max(np.abs(coordinates - coordinates_test))}")
+    #     print("Difference distributions:")
+    #     print(np.histogram(np.abs(coordinates - coordinates_test), bins=10))
+    #     print(f"Evolve match: {np.allclose(evolve, evolve_test)}")
 
-        # check the shapes 
-        print(f"Coordinates shape match: {coordinates.shape == coordinates_test.shape}")
-        print(f"Branch naming match: {np.all(coordinates[:, 2:] == coordinates_test[:,2:])}")
+    #     # check the shapes 
+    #     print(f"Coordinates shape match: {coordinates.shape == coordinates_test.shape}")
+    #     print(f"Branch naming match: {np.all(coordinates[:, 2:] == coordinates_test[:,2:])}")
 
     
 

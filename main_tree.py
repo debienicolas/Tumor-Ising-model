@@ -33,7 +33,7 @@ def calc_neighbor_sum(i:int, spins:np.ndarray, neighbors:np.ndarray) -> float:
     result = np.sum(spins[node_neigh[node_neigh != -1]])
     return result
 
-@numba.njit(nopython=True, fastmath=True, parallel=True)
+@numba.njit(nopython=True, fastmath=True)
 def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
     """
     Calculate the Hamiltonian of the system.
@@ -55,7 +55,7 @@ def calc_magnetization(spins:np.ndarray) -> float:
     """
     Calculate the magnetization of the system.
     """
-    return np.abs(np.sum(spins)/spins.size)
+    return np.abs(np.sum(spins))
 
 @numba.njit(nopython=True, fastmath=True)
 def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int) -> float:
@@ -79,7 +79,8 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
     Returns:
         bool: True if the spin flip was accepted, False otherwise
     """
-    for i in range(spins.size):
+    for _ in range(spins.size):
+        i = np.random.randint(0, spins.size)
         energy_diff = calc_energy_diff(spins, neighbors, J, i)    
         # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
         # flip if delta_E < 0 or exp(-beta * delta_E) > np.random.random()
@@ -105,9 +106,11 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
     # initialize the array to save all the mcmc spin configurations
     spins_collection = np.zeros((n_mcmc, spins.size), dtype=np.int8)
 
-    # initialize the arrays to save the magnetization and energy
+    # initialize the arrays to save the magnetization, energy and specific heat
     sampl_magn = np.zeros(n_samples)
     sampl_energy = np.zeros(n_samples)
+    E1, E2 = 0, 0
+    M1, M2 = 0, 0
 
     # calc the start index for the samples starting from the last sample
     start_index = n_mcmc - n_samples * n_sample_interval
@@ -116,10 +119,18 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
         spins = metropolis_step(spins, neighbors, J, beta)
     for i in range(n_mcmc):
         spins = metropolis_step(spins, neighbors, J, beta)
+
         if i % n_sample_interval == 0 and i >= start_index:
             sample_index = (i - start_index) // n_sample_interval
-            sampl_magn[sample_index] = calc_magnetization(spins)
-            sampl_energy[sample_index] = calc_hamiltonian(spins, neighbors, J) / spins.size
+            magn = calc_magnetization(spins)
+            ener = calc_hamiltonian(spins, neighbors, J)
+            sampl_magn[sample_index] = magn/spins.size
+            sampl_energy[sample_index] = ener/spins.size
+            E1 += ener
+            E2 += ener**2
+            M1 += magn
+            M2 += magn**2
+
         # save the spins
         spins_collection[i] = spins.copy()
     
@@ -127,7 +138,13 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
     mag = np.mean(sampl_magn)
     energy = np.mean(sampl_energy)
 
-    return spins_collection, mag, energy
+    # calculate the specific heat
+    specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))*(beta**2 /spins.size)
+
+    # calculate the susceptibility
+    susceptibility = ((M2/n_samples) - ((M1**2)/(n_samples**2)))*(beta / spins.size)
+
+    return spins_collection, mag, energy, specific_heat, susceptibility
 
 
 
@@ -167,44 +184,6 @@ def branch_evolve(spins:np.ndarray, coords:np.ndarray, evolve:np.ndarray, time_s
             
             nodes[start_idx_new:end_idx_new] = spins[start_idx_old:end_idx_old]
     return nodes, neighbors
-
-    # # get the new coordinates of the branch
-    # new_time = time_step
-    # next_coords = get_branch_at_time(coords, evolve, new_time)
-    # current_coords = get_branch_at_time(coords, evolve, time_step-1)
-    # to_keep_coords = next_coords[current_coords.shape[0]:]
-
-
-    # G = model.G
-    # on_curr_nodes = len(G.nodes)
-    # # set the spins of the current nodes
-    # # create a tree of the next coordinates (all coordinates of the grown branch)
-    # tree = KDTree(next_coords)
-    # # add the new nodes to the graph
-    # for i in range(len(to_keep_coords)):
-    #     G.add_node(on_curr_nodes + i, pos=to_keep_coords[i])
-    # # add the edges to the graph
-    # for i in range(len(G.nodes)):
-    #     # check if there are nodes within the distance threshold
-    #     dists = tree.query_ball_point(G.nodes[i]["pos"], r=distance_threshold)
-    #     for j in dists:
-    #         if i != j and j not in G.neighbors(i):
-    #             G.add_edge(i, j)
-    
-    # # now we have the graph of the grown branch
-    # # conver the graph to the model format
-    # new_spins = np.zeros(next_coords.shape[0])
-    # new_spins[:len(current_coords)] = spins
-    # new_spins[len(current_coords):] = np.random.choice([-1, 1], size=len(to_keep_coords))
-    # _, new_neighbors = graph_to_model_format(G)
-
-    # # update the model with the new graph and the new timestep
-    # model.G = G
-    # model.current_branch_time = new_time
-
-    # assert len(new_spins) == new_neighbors.shape[0], f"Mismatch between spins and neighbors arrays: {len(new_spins)} != {new_neighbors.shape[0]}"
-    # assert np.all(new_neighbors[new_neighbors != -1] < len(new_spins)), f"Invalid neighbor indices: {new_neighbors[new_neighbors != -1]}"
-    # return new_spins, new_neighbors
 
 def simulate_growing_ising_model(spins:np.ndarray, neighbors:np.ndarray, coords:np.ndarray, evolve:np.ndarray, J:float, beta:float,
                                  model:IsingModel) -> np.ndarray:
@@ -264,7 +243,7 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
         # in this case, the spins_collection is a dictionary with time as keys and spins 2d array as values
         # magn and energy are 
     else:
-        spins_collection, magn, energy = simulate(
+        spins_collection, magn, energy, specific_heat, susceptibility = simulate(
             spins = model.nodes, 
             neighbors = model.neighbors, 
             J = model.J, 
@@ -279,7 +258,7 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
     print("Time taken: ", elapsed_time)
     
 
-    model.save_results(spins_collection, magn, energy)
+    model.save_results(spins_collection, magn, energy, specific_heat, susceptibility)
 
     # magn and energy have been averaged over a certain amount of samples
     return model

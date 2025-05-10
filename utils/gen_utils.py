@@ -112,6 +112,9 @@ def plot_stacked_graph(graph, level_offset=20):
     plt.show()
 
 
+
+
+
 def plot_magn_energy(magn: np.ndarray|list, energy: np.ndarray|list, temps: np.ndarray|list, save_path:str=None, show: bool=True, title:str=None):
     """
     Plot the magnetization and energy as a function of temperature

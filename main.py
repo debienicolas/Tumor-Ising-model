@@ -26,6 +26,7 @@ class IsingModel:
         
         # Initialize random spin configuration
         self.spins = np.random.choice([-1, 1], size=(size, size))
+        self.spins = np.ones((size, size))
         
         
         # For tracking observables
@@ -73,7 +74,7 @@ def calc_magnetization(spins:np.ndarray) -> float:
     """
     Calculate the magnetization of the system.
     """
-    return np.abs(np.sum(spins)/spins.size)
+    return np.abs(np.sum(spins))
 
 
 @numba.njit(nopython=True)
@@ -111,9 +112,6 @@ def calc_energy_diff(spins:np.ndarray, J:float, i:int, j:int, up:np.ndarray, dow
     )
     return 2 * J * spins[i,j] * neighbors_sum
 
-
-
-
 @numba.njit(nopython=True)
 def metropolis_step(spins: np.ndarray, J: float, beta: float, up: np.ndarray, down: np.ndarray, left: np.ndarray, right: np.ndarray) -> np.ndarray:
     """
@@ -131,8 +129,8 @@ def metropolis_step(spins: np.ndarray, J: float, beta: float, up: np.ndarray, do
     n, m = spins.shape
     for i in range(n):
         for j in range(m):
-            # i = np.random.randint(0, n)  # Using Numba-compatible random functions
-            # j = np.random.randint(0, m)
+            i = np.random.randint(0, n)  # Using Numba-compatible random functions
+            j = np.random.randint(0, m)
 
             energy_diff = calc_energy_diff(spins, J, i, j, up, down, left, right)    
             # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
@@ -181,7 +179,6 @@ def animate_ising_model(model: IsingModel, T: float=None, plot: str=None):
     
     plt.close(fig)
 
-
 def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=None) -> IsingModel:
     """
     Perform the Metropolis algorithm for the Ising model.
@@ -205,13 +202,23 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
     spins = model.spins
     J = model.J
     beta = model.beta
-    
+
+    n_samples = 2000
+    n_sample_interval = 1
+
+    magn_list = []
+    energy_list = []
+    sample_start_index = n_iterations - n_samples * n_sample_interval
     # Add initial state as first frame
     if plot:
         model.frames.append(spins.copy())
     
     up, down, left, right = setup_neighbor_indices(spins.shape[0], spins.shape[1])
     start_time = time.time()
+
+    E1, E2 = 0,0
+    M = np.zeros_like(spins)
+    M1, M2 = 0,0
     
     # Main simulation loop
     for iter in tqdm(range(n_iterations)):
@@ -221,14 +228,42 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
         # Save frame every save_every iterations if plotting is enabled
         if plot and iter % save_every == 0:
             model.frames.append(spins.copy())
-    
+        
+        if iter >= sample_start_index and iter % n_sample_interval == 0:
+            magn = calc_magnetization(spins) # sum over all spins / n_sites
+            magn_list.append(magn/spins.size)
+            ener = calc_hamiltonian(spins, J)
+            energy_density = ener / spins.size
+            energy_list.append(energy_density)
+            E1 += ener
+            E2 += ener**2
+            M += spins
+            M1 += magn
+            M2 += magn**2
+
+
     elapsed_time = time.time() - start_time
     print(f"Time taken: {elapsed_time:.2f} seconds")
     print(f"Collected {len(model.frames)} frames for animation")
 
     model.spins_final = spins
-    model.energy_final = calc_hamiltonian(spins, J) / spins.size
-    model.magnetization_final = calc_magnetization(spins)
+    model.energy_final = np.mean(energy_list)
+    model.magnetization_final = np.mean(magn_list)
+    model.energy_list = energy_list
+    model.magnetization_list = magn_list
+
+
+    # calculate the specific heat 
+    specific_heat = ((E2/n_samples) - (E1*E1/(n_samples**2)))/(model.temperature**2 * spins.size)
+    #specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))/(model.temperature**2)
+    model.E1 = E1/(n_samples)
+    model.E2 = E2/(n_samples**2)
+    model.specific_heat = specific_heat
+
+    # calculate the susceptibility
+    M = M / n_samples     # average magnetization per spin * size of system 
+    model.M = M/spins.size
+    model.susceptibility = ((M2/n_samples) - (M1*M1/(n_samples**2)))/(model.temperature * spins.size)
             
     if plot:
         animate_ising_model(model, T=round(model.temperature, 2), plot=plot)

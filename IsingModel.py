@@ -17,7 +17,7 @@ class IsingModel:
     n_equilib_steps:int
     n_mcmc_steps:int
     n_samples:int = 10
-    n_sample_interval:int = 10
+    n_sample_interval:int = 1
     G: nx.Graph | None = None
     coords:np.ndarray | None = None
     evolve:np.ndarray | None = None
@@ -29,7 +29,7 @@ class IsingModel:
     def beta(self):
         return 1/self.temp       
 
-    def save_results(self, spins:np.ndarray, magn:float, energy:float) -> None:
+    def save_results(self, spins:np.ndarray, magn:float, energy:float, specific_heat:float, susceptibility:float) -> None:
         """
         Save the results of the simulation to the dataclass.
 
@@ -43,7 +43,8 @@ class IsingModel:
         self.spins = spins
         self.total_magn = magn
         self.total_energy = energy
-
+        self.specific_heat = specific_heat
+        self.susceptibility = susceptibility
         # set a flag to indicate the config has been simulated
         self.simulated = True
 

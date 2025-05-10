@@ -98,7 +98,7 @@ def branch_growth_animation(coordinates:np.ndarray, evolve:np.ndarray, output_pa
     print(f"Branch growth animation saved to {output_path}")
     plt.close()
 
-def plot_branch_graph(G:nx.Graph, save_path=None, show:bool=True, node_colors=None) -> Axes:
+def plot_branch_graph(G:nx.Graph, save_path=None, show:bool=True, node_colors=None, ax:Axes=None) -> Axes:
     """
     Plot the branch graph.
 
@@ -110,16 +110,20 @@ def plot_branch_graph(G:nx.Graph, save_path=None, show:bool=True, node_colors=No
     Returns:
         ax: the axis of the plot
     """
-    fig, ax = plt.subplots(figsize=(15,15))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(15,15))
+    else:
+        fig = ax.get_figure()
     nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, node_size=10, ax=ax, node_color=node_colors)
     if save_path:
         plt.savefig(save_path)
+        plt.close()
     elif show:
         plt.show()
-    plt.close()
-    return fig
+        plt.close()
+    return ax
 
-def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None, show:bool=True, save_path=None, title:str=None) -> Axes:
+def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None, show:bool=True, save_path=None, title:str=None, ax:Axes=None) -> Axes:
     """
     Plots the branch coordinates.
 
@@ -129,11 +133,15 @@ def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None
         end_time (int): the last time step to plot
         show (bool): whether to show the plot
         save_path (str): the path to save the plot
-    
+        title (str): the title of the plot
+        ax (Axes): the axis to plot on
     Returns:
         ax: 
     """
-    fig, ax = plt.subplots(figsize=(10,10))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10,10))
+    else:
+        fig = ax.get_figure()
     if title:
         fig.suptitle(title)
     ms = 1.5
@@ -165,7 +173,8 @@ def plot_branch_network(coordinates:np.ndarray, evolve:np.ndarray, end_time=None
         labelbottom=False)
     if save_path:
         plt.savefig(save_path)
+        plt.close()
     elif show:
         plt.show()
-    plt.close()
+        plt.close()
     return ax

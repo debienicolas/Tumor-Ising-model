@@ -1,78 +1,43 @@
 # Tumor Ising model
 
-This code consist of 3 main steps:  
-1. Generating the topology
-2. Running the Ising model
-3. Analysis of the Ising model results (TO DO)
+The main biologically motivated question this project tries to answer is:  
+What behavior does the Ising model exhibit on a biological branching topology?
 
-To do:
-- fix the magnetization and energy calculations -> DONE
-- Dimensional crossover 
-- Add branching in time
+## Project structure
+There are 3 main components:  
 
-- adding nodes, same as adjacent
-- make sure the branching in time also supports dimensional crossover
-- prerun some very large tmax simulations and save those coords and evolve arrays to file  
-- calculate correlation statistics 
-
-Pot. concerns:
-- Metropolis single flip suffers from critical slow down? -> Wolff algorithm (cluster flip algorithms)
+1. **Topology Generation**
+    - Generation of branching morphogenesis graphs
 
 
-## Code
+2. **Ising model simulations**
+    - Implementation of the Ising model on the generated topologies
+    - Simulation of 'cell' interactions and state changes
 
-Scripts illustrating various functionalities are located in scripts folder:
-- single_branch.py -> Run the ising model on a single branch at a certain time_step
-- growing_branch.py -> Run the ising model on an in time growing branch structure
+3. **Analysis** (In Progress)
+    - Calculating relevant graph statistics
+    - Evaluation of critical exponents
 
-To Do:
-- Fix the dimensional crossover and have dimensional crossover on growing branch
+**Other features:**
+- Dimensional crossover by stacking branching topologies
+- Ising model on time-evolving branches
 
-## optimizations
-To be able to save every spin configuration, save them as np.int8 -> single byte per site.  
-Using numba and just in time compiling.  
-- Transform the simulation code to numba compatible code.
-
-## Experimentation
-
-Questions to answer:
-- Is there a periodic pattern in the MCMC Steps
-- Cross dimensionality but also in other direction, to approach a circular 3D tube
-- Initialisation impact
+This project is implemented in python using numba and JIT compiling. If needed in the future, a C++ version will be made.
 
 
-## Benchmarking
-orignal -> no njit usage   
-mod_1 -> njit subroutine 1 and subroutine 2  
-
-There are discrepancies between the optimised code and the original code which eventually leads to different branching structures 
-
-## Other considerations
-3D model should actually be a tube where cells live in the tube wall. 
-
-## Results: Branching 
+## Visualisation
 
 <div align="center">
-<img src="output_mam_final/n_iter10000_J2.0_spins.png" alt="Ising Model Simulation" width="600">
+<img src="output/animations/branch_growth_150_cropped.gif" alt="branch_gen" width="400"/>
+<p><em>1.Generation of Branching morphogenesis</em></p>
 </div>
 
 <div align="center">
-<img src="output_mam_final/magn_energy.png" alt="energy_magn" width="600">
+<img src="output/animations/ising_animation_cropped.gif" alt="Ising_sim" width="400"/>
+<p><em>2.Ising model simulation</em></p>
 </div>
 
 <div align="center">
-<img src="output_mam_final/animation_20250425_111009_T1.0_J2.0_iters10000.gif" alt="animation" width="600">
+<img src="output/single_branch/overview_single_branch.png" alt="Ising_sim" width="600"/>
+<p><em>3. Global Ising model statistics</em></p>
 </div>
-
-
-## Results: Grid 
-
-<div align="center">
-<img src="output_grid/ising_simulation_temps_spins_30x30_1.0_10000.png" alt="temp_grid" width="600">
-</div>
-<div align="center">
-<img src="output_grid/ising_simulation_temps_30x30_1.0_10000.png" alt="temp_stats" width="600">
-</div>
-
-
-## Requirements
