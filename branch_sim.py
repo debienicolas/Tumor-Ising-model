@@ -266,6 +266,7 @@ class MamSimulation:
     # prob_branch: probability of branching
     # fav: favorability of self-avoidance
     # fchem: favorability of chemical guidance -> influences directional bias of branch growth
+    
     def tissue1(self,prob_branch:float,fav:float,fchem:float):
         
         skip = 0 

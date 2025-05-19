@@ -18,6 +18,7 @@ class IsingModel:
     n_mcmc_steps:int
     n_samples:int = 10
     n_sample_interval:int = 1
+    step_algorithm:str = "metropolis" # metropolis or glauber or wolff
     G: nx.Graph | None = None
     coords:np.ndarray | None = None
     evolve:np.ndarray | None = None
@@ -49,3 +50,35 @@ class IsingModel:
         self.simulated = True
 
     
+    def get_config(self) -> dict:
+        """
+        Return the configuration of the model as a dictionary. 
+        """
+        return {
+            "temp": self.temp,
+            "J": self.J,
+            "n_equilib_steps": self.n_equilib_steps,
+            "n_mcmc_steps": self.n_mcmc_steps,
+            "n_samples": self.n_samples,
+            "n_sample_interval": self.n_sample_interval,
+            "start_time": self.start_time,
+            "save_frames": self.save_frames,
+            "dim_cross": self.dim_cross,
+            "step_algorithm": self.step_algorithm
+        }
+
+
+class IsingLatticeModel(IsingModel):
+    """
+    Ising model dataclass for lattice models.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.nodes = np.ones(self.nodes.shape)
+        self.neighbors = np.zeros((self.nodes.shape[0], 4))
+        self.neighbors.fill(-1)
+    
+
+    def create_lattice(self, size:int):
+        pass 
+        

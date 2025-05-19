@@ -16,10 +16,15 @@ from branch_sim import MamSimulation
 from scipy.spatial import KDTree
 from collections import defaultdict
 from numba import prange
+from multiprocessing import Pool, cpu_count
 
 from utils.gen_utils import graph_to_model_format
 from utils.branch_sim_utils import convert_branch_coords_to_graph, model_format_at_time
 from IsingModel import IsingModel 
+
+
+from numba import njit
+
 
 
 @numba.njit(nopython=True, fastmath=True)
@@ -41,13 +46,21 @@ def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
     """
     H = 0
     for i in range(0,spins.shape[0]):
+        node_neigh = neighbors[i,:]
+        valid_neighs = node_neigh[node_neigh != -1]
+        for j in valid_neighs:
+            H += -J * spins[i] * spins[j]
+    return H / 2
+
+    H = 0
+    for i in range(0,spins.shape[0]):
         neighs_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
         if np.isnan(neighs_sum):
             print(f"NaN neighbor sum at node {i}")
             continue
         H += -J * spins[i] * neighs_sum
-    if H == 0:
-        print("Zero Hamiltonian detected")
+    # if H == 0:
+    #     print("Zero Hamiltonian detected")
     return H / 2
 
 @numba.njit(nopython=True, fastmath=True)
@@ -62,6 +75,10 @@ def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int) -> 
     """
     Calculate the energy difference of flipping a spin.
     """
+    hamil_before = calc_hamiltonian(spins, neighbors, J)
+    spins[i] *= -1
+    hamil_after = calc_hamiltonian(spins, neighbors, J)
+    return hamil_after - hamil_before
     neighbors_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
     return 2 * J * spins[i] * neighbors_sum
 
@@ -79,17 +96,84 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
     Returns:
         bool: True if the spin flip was accepted, False otherwise
     """
-    for _ in range(spins.size):
-        i = np.random.randint(0, spins.size)
-        energy_diff = calc_energy_diff(spins, neighbors, J, i)    
-        # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
-        # flip if delta_E < 0 or exp(-beta * delta_E) > np.random.random()
-        if energy_diff < 0 or np.exp(-beta * energy_diff) > np.random.random():
-            spins[i] *= -1
+    #for _ in range(spins.size):
+    i = np.random.randint(0, spins.size)
+    #print(i)
+    energy_diff = calc_energy_diff(spins.copy(), neighbors, J, i)    
+    # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
+    # flip if delta_E < 0 or exp(-beta * delta_E) > np.random.random()
+    if energy_diff < 0 or np.exp(-beta * energy_diff) > np.random.random():
+        spins[i] *= -1
     return spins
 
 @numba.njit(nopython=True, fastmath=True)
-def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mcmc:int, n_samples:int, n_sample_interval:int) -> np.ndarray:
+def glauber_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta: float)-> np.ndarray:
+    """
+    Differs from the Metropolis step in that it uses the Fermi function to determine the probability of flipping the spin. 
+    ref. https://en.wikipedia.org/wiki/Glauber_dynamics
+    """
+    for _ in range(spins.size):
+        i = np.random.randint(0, spins.size)
+        energy_diff = calc_energy_diff(spins, neighbors, J, i)
+        # Differs from metropolist step: use the Fermi function
+        prob = 1 / (1 + np.exp(energy_diff*beta))
+        if np.random.random() < prob:
+            spins[i] *= -1
+    return spins
+
+@numba.njit(nopython=True, fastmath=True, parallel=False)
+def wolff_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float)-> np.ndarray:
+    """
+    Perform a single Wolff sweep on the system.
+    """
+    # calculate the P_add
+    P_add = 1 - np.exp(-2*J*beta)
+    # Pick a random starting node
+    seed_idx = np.random.randint(0, spins.size)
+    seed_spin = spins[seed_idx]
+    
+    # Use arrays instead of checking sum each iteration
+    cluster = np.zeros(spins.size, dtype=np.int8)
+    frontier = np.zeros(spins.size, dtype=np.int8)
+    
+    # Add seed to cluster and frontier
+    cluster[seed_idx] = 1
+    frontier[seed_idx] = 1
+    frontier_size = 1
+    
+    # Use a counter instead of np.sum each iteration
+    while frontier_size > 0:
+        # Find frontier nodes efficiently
+        frontier_indices = np.where(frontier == 1)[0]
+        # Pick the first one instead of a random choice (much faster)
+        current = frontier_indices[0]
+        frontier[current] = 0
+        frontier_size -= 1
+        
+        # Get neighbors of current node
+        node_neighs = neighbors[current]
+        # Process only valid neighbors (-1 indicates no neighbor)
+        valid_mask = node_neighs != -1
+        valid_neighbors = node_neighs[valid_mask]
+        
+        # Find neighbors with same spin as seed that aren't already in cluster
+        for neigh in valid_neighbors:
+            if spins[neigh] == seed_spin and cluster[neigh] == 0:
+                # Add to cluster with probability P_add
+                if np.random.random() < P_add:
+                    cluster[neigh] = 1
+                    frontier[neigh] = 1
+                    frontier_size += 1
+    
+    # Flip all spins in the cluster
+    cluster_indices = np.where(cluster == 1)[0]
+    spins[cluster_indices] *= -1
+            
+    return spins
+            
+
+#@numba.njit(nopython=True, fastmath=True)
+def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mcmc:int, n_samples:int, n_sample_interval:int, step_algorithm:str) -> np.ndarray:
     """
     Simulate the Ising model.
     Save every spins during the mcmc steps.
@@ -102,49 +186,91 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
     """
 
     assert spins.ndim == 1, "spins must be a 1D array"
+    assert neighbors.ndim == 2, "neighbors must be a 2D array"
+    assert n_mcmc % n_sample_interval == 0, "n_mcmc must be divisible by n_sample_interval"
+    # use just n_mcmc and sample_interval to calculate the number of samples
+    n_samples = n_mcmc // n_sample_interval
 
-    # initialize the array to save all the mcmc spin configurations
-    spins_collection = np.zeros((n_mcmc, spins.size), dtype=np.int8)
+    ##### Initialize the arrays for saving the results #####
 
-    # initialize the arrays to save the magnetization, energy and specific heat
-    sampl_magn = np.zeros(n_samples)
-    sampl_energy = np.zeros(n_samples)
-    E1, E2 = 0, 0
-    M1, M2 = 0, 0
+    # equilibrium samples
+    energy_equil = np.zeros(n_equilibration)
+    magn_equil = np.zeros(n_equilibration)
 
-    # calc the start index for the samples starting from the last sample
-    start_index = n_mcmc - n_samples * n_sample_interval
+    # mcmc samples
+    spins_samples = np.zeros((n_samples, spins.size), dtype=np.int8)
+    magn_samples = np.zeros(n_samples, dtype=np.float32)
+    energy_samples = np.zeros(n_samples, dtype=np.float32)
+
+    magn_all = np.zeros(n_mcmc)
+    energy_all = np.zeros(n_mcmc)
+
+    # used for calc. specific heat and susceptibilit -> using the MCMC samples
+    E1,E2 = 0,0
+    M1,M2 = 0,0
     
-    for i in range(n_equilibration):
-        spins = metropolis_step(spins, neighbors, J, beta)
-    for i in range(n_mcmc):
-        spins = metropolis_step(spins, neighbors, J, beta)
 
-        if i % n_sample_interval == 0 and i >= start_index:
-            sample_index = (i - start_index) // n_sample_interval
-            magn = calc_magnetization(spins)
-            ener = calc_hamiltonian(spins, neighbors, J)
-            sampl_magn[sample_index] = magn/spins.size
-            sampl_energy[sample_index] = ener/spins.size
-            E1 += ener
-            E2 += ener**2
+    ##### Equilibration #####
+    for i in range(n_equilibration):
+        if step_algorithm == "metropolis":
+            spins = metropolis_step(spins, neighbors, J, beta)
+        elif step_algorithm == "glauber":
+            spins = glauber_step(spins, neighbors, J, beta)
+        elif step_algorithm == "wolff":
+            spins = wolff_step(spins, neighbors, J, beta)
+        
+        # save the equilibrium time steps
+        energy_equil[i] = calc_hamiltonian(spins, neighbors, J) / spins.size
+        magn_equil[i] = calc_magnetization(spins) / spins.size
+
+    ##### MCMC #####
+    for i in range(n_mcmc):
+        if step_algorithm == "metropolis":
+            spins = metropolis_step(spins, neighbors, J, beta)
+        elif step_algorithm == "glauber":
+            spins = glauber_step(spins, neighbors, J, beta)
+        elif step_algorithm == "wolff":
+            spins = wolff_step(spins, neighbors, J, beta)
+        
+        energy = calc_hamiltonian(spins, neighbors, J)/spins.size
+        energy_all[i] = energy
+        magn = calc_magnetization(spins)/spins.size
+        magn_all[i] = magn
+        
+        # save the mcmc samples 
+        if i % n_sample_interval == 0:
+            i = i // n_sample_interval
+            energy_samples[i] = energy
+            magn_samples[i] = magn
+
+            # update the used for calc. specific heat and susceptibilit -> using the MCMC samples
+            E1 += energy
+            E2 += energy**2
             M1 += magn
             M2 += magn**2
 
-        # save the spins
-        spins_collection[i] = spins.copy()
+            # save the spins
+            spins_samples[i] = spins.copy()
     
+
+    ##### Calculate the results #####
+
     # average the magnetization and energy over the amount of samples
-    mag = np.mean(sampl_magn)
-    energy = np.mean(sampl_energy)
+    avg_magn = np.mean(magn_samples)
+    avg_energy = np.mean(energy_samples)
 
-    # calculate the specific heat
-    specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))*(beta**2 /spins.size)
+    if n_samples > 0:
+        # calculate the specific heat
+        specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))*(beta**2 /spins.size)
 
-    # calculate the susceptibility
-    susceptibility = ((M2/n_samples) - ((M1**2)/(n_samples**2)))*(beta / spins.size)
+        # calculate the susceptibility
+        susceptibility = ((M2/n_samples) - ((M1**2)/(n_samples**2)))*(beta / spins.size)
 
-    return spins_collection, mag, energy, specific_heat, susceptibility
+    else:
+        specific_heat = None
+        susceptibility = None
+
+    return spins_samples, avg_magn, avg_energy, specific_heat, susceptibility, energy_samples, magn_samples, energy_equil, magn_equil, magn_all, energy_all
 
 
 
@@ -243,7 +369,7 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
         # in this case, the spins_collection is a dictionary with time as keys and spins 2d array as values
         # magn and energy are 
     else:
-        spins_collection, magn, energy, specific_heat, susceptibility = simulate(
+        spins_samples, avg_magn, avg_energy, specific_heat, susceptibility, energy_samples, magn_samples, energy_equil, magn_equil, magn_all, energy_all = simulate(
             spins = model.nodes, 
             neighbors = model.neighbors, 
             J = model.J, 
@@ -251,17 +377,70 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
             n_equilibration = model.n_equilib_steps, 
             n_mcmc = model.n_mcmc_steps,
             n_samples = model.n_samples,
-            n_sample_interval = model.n_sample_interval)
+            n_sample_interval = model.n_sample_interval,
+            step_algorithm = model.step_algorithm)
         
     
     elapsed_time = time.time() - start_time
-    print("Time taken: ", elapsed_time)
+    print(f"Temperature: {model.temp} - Time taken: {elapsed_time}")
     
 
-    model.save_results(spins_collection, magn, energy, specific_heat, susceptibility)
+    #model.save_results(spins_collection, magn, energy, specific_heat, susceptibility)
+    model.sample_spins = spins_samples
+    model.avg_magn = avg_magn
+    model.avg_energy = avg_energy
+    model.specific_heat = specific_heat
+    model.susceptibility = susceptibility
+    model.energy_samples = energy_samples
+    model.magn_samples = magn_samples
+    model.energy_equil = energy_equil
+    model.magn_equil = magn_equil
+    model.magn_all = magn_all
+    model.energy_all = energy_all
 
     # magn and energy have been averaged over a certain amount of samples
     return model
+
+def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equilib_steps:int, n_mcmc_steps:int, n_samples:int, n_sample_interval:int, temps:np.ndarray) -> IsingModel:
+    """
+    Simulate the entire ising model on all provided temps.
+    General steps:
+    - calculate the total amount of themolization/equilibration steps
+    - calculate the autocorrelation time -> do this for each temp specifically
+    - run the simulation for each temp in separate processes (make sure to precompile the njit functions)
+    - save and plot the results
+    """
+    try:
+        # create a pool of processes
+        n_processes = cpu_count() - 2
+        print(f"Using {n_processes} processes")
+        pool = Pool(n_processes)
+
+        results = {}
+        for t in tqdm(temps):
+            # create a model
+            nodes = np.random.choice([-1, 1], size=nodes.size)
+            model = IsingModel(nodes=nodes, neighbors=neighbors, temp=t, J=J, 
+                             n_equilib_steps=n_equilib_steps, n_mcmc_steps=n_mcmc_steps, 
+                             n_samples=n_samples, n_sample_interval=n_sample_interval)
+            
+            # run the simulation in parallel, collect the results
+            results[t] = pool.apply_async(simulate_ising_model, args=(model,))
+        
+        # Wait for all processes to complete and collect results
+        final_results = {t: result.get() for t, result in results.items()}
+        
+        return final_results
+        
+    except Exception as e:
+        print(f"Error in parallel processing: {e}")
+        raise
+    finally:
+        # Always clean up the pool
+        pool.close()
+        pool.join()
+
+    
 
 def plot_graph(nodes:np.ndarray, neighbors:np.ndarray, ax=None, G=None, draw_edges=True):
     """

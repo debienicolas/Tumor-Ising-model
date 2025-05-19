@@ -11,7 +11,9 @@ output_dim
 # ignore output_directories
 output_*
 
-branching_mojo/
+output/*
+
+wandb/
 
 # mlflow stuff
 mlartifacts/
@@ -21,3 +23,5 @@ bench_output/
 readme_hidden.md
 
 output/branch_structures/
+
+ising_visualization

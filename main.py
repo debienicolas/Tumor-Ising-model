@@ -5,6 +5,7 @@ import time
 from tqdm import tqdm
 import numba
 import os
+from collections import deque
 
 class IsingModel:
     def __init__(self, size=50, temperature=2.0, J=1.0):
@@ -139,6 +140,49 @@ def metropolis_step(spins: np.ndarray, J: float, beta: float, up: np.ndarray, do
                 spins[i,j] *= -1
     return spins
 
+
+def wolff_cluster_update(grid, temperature, J):
+    """Perform one Wolff cluster update."""
+    for _ in range(grid.shape[0]):
+        for _ in range(grid.shape[1]):
+            size = grid.shape[0]
+            
+            # Choose a random starting point
+            i = np.random.randint(0, size)
+            j = np.random.randint(0, size)
+            
+            # Initialize the cluster
+            cluster = set()
+            to_visit = deque([(i, j)])
+            cluster.add((i, j))
+            
+            # Probability of adding a spin to the cluster
+            p = 1.0 - np.exp(-2.0 * J / temperature)
+            
+            while to_visit:
+                i, j = to_visit.popleft()
+                spin = grid[i, j]
+                
+                # Check all four neighbors
+                neighbors = [
+                    (i, (j - 1) % size),  # left
+                    (i, (j + 1) % size),  # right
+                    ((i - 1) % size, j),  # up
+                    ((i + 1) % size, j)   # down
+                ]
+                
+                for ni, nj in neighbors:
+                    if (ni, nj) not in cluster and grid[ni, nj] == spin:
+                        if np.random.random() < p:
+                            cluster.add((ni, nj))
+                            to_visit.append((ni, nj))
+            
+            # Flip all spins in the cluster
+            for i, j in cluster:
+                grid[i, j] *= -1
+    
+    return grid
+
 def animate_ising_model(model: IsingModel, T: float=None, plot: str=None):
     """
     Animate the Ising model.
@@ -179,6 +223,23 @@ def animate_ising_model(model: IsingModel, T: float=None, plot: str=None):
     
     plt.close(fig)
 
+@numba.njit(nopython=True)
+def calculate_auto_corr(samples: np.ndarray) -> np.ndarray:
+    #print(samples)
+    num_measurements = len(samples)
+    auto_corr = np.zeros(num_measurements)
+    max_lag = num_measurements//5
+    for k in range(max_lag):
+        upper_lim = num_measurements - k
+        mean = np.sum(samples[:upper_lim]) / upper_lim
+        for i in range(upper_lim):
+            auto_corr[k] += samples[i + k] * (samples[i] - mean)
+        auto_corr[k] /= upper_lim
+    #print(auto_corr)
+    #print(auto_corr[0])
+    auto_corr /= auto_corr[0]
+    return auto_corr
+
 def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=None) -> IsingModel:
     """
     Perform the Metropolis algorithm for the Ising model.
@@ -203,7 +264,7 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
     J = model.J
     beta = model.beta
 
-    n_samples = 2000
+    n_samples = 200
     n_sample_interval = 1
 
     magn_list = []
@@ -220,10 +281,13 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
     M = np.zeros_like(spins)
     M1, M2 = 0,0
     
+    spin_samples = []
+
     # Main simulation loop
     for iter in tqdm(range(n_iterations)):
         # Perform single Metropolis step
         spins = metropolis_step(spins, J, beta, up, down, left, right)
+        #spins = wolff_cluster_update(spins, model.temperature, J)
             
         # Save frame every save_every iterations if plotting is enabled
         if plot and iter % save_every == 0:
@@ -264,6 +328,14 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
     M = M / n_samples     # average magnetization per spin * size of system 
     model.M = M/spins.size
     model.susceptibility = ((M2/n_samples) - (M1*M1/(n_samples**2)))/(model.temperature * spins.size)
+
+
+    # Calculate the autocorrelation time for E
+    ener_samples = np.array(model.energy_list)
+    model.auto_corr = calculate_auto_corr(ener_samples)
+    # print(model.auto_corr)
+    # plt.plot(model.auto_corr)
+    # plt.show()
             
     if plot:
         animate_ising_model(model, T=round(model.temperature, 2), plot=plot)
@@ -275,54 +347,6 @@ def simulate_ising_model(model: IsingModel, n_iterations: int=10_000, plot: str=
         plt.close()
     return model
 
-def calculate_specific_heat(temps: np.ndarray, energies: np.ndarray) -> np.ndarray:
-    """
-    Calculate specific heat from energies as a function of temperature.
-    Uses finite difference approximation for the derivative of energy with respect to temperature.
-    
-    Args:
-        temps: Array of temperatures
-        energies: Array of energy values corresponding to temperatures
-        
-    Returns:
-        np.ndarray: Specific heat values
-    """
-    specific_heat = np.zeros_like(temps)
-    
-    # Calculate derivatives using central difference for interior points
-    for i in range(1, len(temps)-1):
-        specific_heat[i] = (energies[i+1] - energies[i-1])/(temps[i+1] - temps[i-1])
-    
-    # Handle endpoints with forward/backward difference
-    specific_heat[0] = (energies[1] - energies[0])/(temps[1] - temps[0])
-    specific_heat[-1] = (energies[-1] - energies[-2])/(temps[-1] - temps[-2])
-    
-    return specific_heat
-
-def calculate_susceptibility(temps: np.ndarray, magnetizations: np.ndarray) -> np.ndarray:
-    """
-    Calculate magnetic susceptibility from magnetization as a function of temperature.
-    Uses finite difference approximation for the derivative of magnetization with respect to temperature.
-    The negative sign is because susceptibility is defined as -d(magnetization)/d(temperature).
-    
-    Args:
-        temps: Array of temperatures
-        magnetizations: Array of magnetization values corresponding to temperatures
-        
-    Returns:
-        np.ndarray: Susceptibility values
-    """
-    susceptibility = np.zeros_like(temps)
-    
-    # Calculate derivatives using central difference for interior points
-    for i in range(1, len(temps)-1):
-        susceptibility[i] = -1 * (magnetizations[i+1] - magnetizations[i-1])/(temps[i+1] - temps[i-1])
-    
-    # Handle endpoints with forward/backward difference
-    susceptibility[0] = -1 * (magnetizations[1] - magnetizations[0])/(temps[1] - temps[0])
-    susceptibility[-1] = -1 * (magnetizations[-1] - magnetizations[-2])/(temps[-1] - temps[-2])
-    
-    return susceptibility
 
 def simulate_ising_model_temps(temps: np.ndarray, grid_size: int=50, J: float=1.0, n_iterations: int=10_000) -> np.ndarray:
     """

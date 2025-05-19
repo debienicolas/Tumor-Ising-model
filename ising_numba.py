@@ -135,7 +135,7 @@ if __name__ == "__main__":
             steps = int(sys.argv[2])
             if len(sys.argv) > 3:
                 temperature = float(sys.argv[3])
-        
+            
         main(size, steps, temperature)
     else:
         main()

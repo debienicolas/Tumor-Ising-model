@@ -18,23 +18,27 @@ output_dir = "output/lattice"
 os.makedirs(output_dir, exist_ok=True)
 
 
-sizes = np.arange(10,50,10)
-temps = np.linspace(0.1, 5.0, 200)
+sizes = np.arange(50,60,10)
+temps = np.linspace(0.1, 2.5, 100)
+temps = np.linspace(0.5, 2.5,10)
+temps = np.array([0.5,1.0,1.5,2.0,2.27,3.0])
 
 magnetizations, energies = {}, {}
 specific_heat, susceptibility = {}, {}
+auto_corr = {}
 for size in sizes:
     magnetizations[size], energies[size] = [], []
     specific_heat[size] = []
     susceptibility[size] = []
+    auto_corr[size] = {}
     for T in temps:
         model = IsingModel(size=size, temperature=T)
-        model = simulate_ising_model(model, n_iterations=5_000)
+        model = simulate_ising_model(model, n_iterations=1000)
         magnetizations[size].append(model.magnetization_final)
         energies[size].append(model.energy_final)
         specific_heat[size].append(model.specific_heat)
         susceptibility[size].append(model.susceptibility)
-
+        auto_corr[size][T] = model.auto_corr
     # smooth the data
     sigma = 4
     magnetizations[size] = gaussian_filter1d(magnetizations[size], sigma=sigma)
@@ -78,6 +82,21 @@ plt.suptitle('Lattice')
 plt.tight_layout()
 
 plt.savefig(os.path.join(output_dir, f'lattice_overview.png'))
+#plt.show()
+
+
+
+
+# plot the auto_corr
+for size in sizes:
+    plt.figure()
+    # set log y axis
+    #plt.yscale('log')
+    # set the y limit to 1 and add ticks 1/e and 1/e^2
+    plt.ylim(0.0, 1.0)
+    #plt.yticks([0.1,1/np.e,1/np.e**2])
+    for T in auto_corr[size].keys():
+        plt.plot(auto_corr[size][T], label=f'T={T:.2f}')
+    plt.title(f'size={size}')
+    plt.legend()
 plt.show()
-
-
