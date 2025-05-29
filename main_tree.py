@@ -96,14 +96,14 @@ def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: fl
     Returns:
         bool: True if the spin flip was accepted, False otherwise
     """
-    #for _ in range(spins.size):
-    i = np.random.randint(0, spins.size)
-    #print(i)
-    energy_diff = calc_energy_diff(spins.copy(), neighbors, J, i)    
-    # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
-    # flip if delta_E < 0 or exp(-beta * delta_E) > np.random.random()
-    if energy_diff < 0 or np.exp(-beta * energy_diff) > np.random.random():
-        spins[i] *= -1
+    for _ in range(spins.size):
+        i = np.random.randint(0, spins.size)
+        #print(i)
+        energy_diff = calc_energy_diff(spins.copy(), neighbors, J, i)    
+        # prob of flipping the spin = exp(-beta * delta_E) if delta_E > 0
+        # flip if delta_E < 0 or exp(-beta * delta_E) > np.random.random()
+        if energy_diff < 0 or np.exp(-beta * energy_diff) > np.random.random():
+            spins[i] *= -1
     return spins
 
 @numba.njit(nopython=True, fastmath=True)
@@ -112,13 +112,13 @@ def glauber_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta: float)->
     Differs from the Metropolis step in that it uses the Fermi function to determine the probability of flipping the spin. 
     ref. https://en.wikipedia.org/wiki/Glauber_dynamics
     """
-    for _ in range(spins.size):
-        i = np.random.randint(0, spins.size)
-        energy_diff = calc_energy_diff(spins, neighbors, J, i)
-        # Differs from metropolist step: use the Fermi function
-        prob = 1 / (1 + np.exp(energy_diff*beta))
-        if np.random.random() < prob:
-            spins[i] *= -1
+    #for _ in range(spins.size):
+    i = np.random.randint(0, spins.size)
+    energy_diff = calc_energy_diff(spins, neighbors, J, i)
+    # Differs from metropolist step: use the Fermi function
+    prob = 1 / (1 + np.exp(energy_diff*beta))
+    if np.random.random() < prob:
+        spins[i] *= -1
     return spins
 
 @numba.njit(nopython=True, fastmath=True, parallel=False)
@@ -126,48 +126,49 @@ def wolff_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float)-> np
     """
     Perform a single Wolff sweep on the system.
     """
-    # calculate the P_add
-    P_add = 1 - np.exp(-2*J*beta)
-    # Pick a random starting node
-    seed_idx = np.random.randint(0, spins.size)
-    seed_spin = spins[seed_idx]
-    
-    # Use arrays instead of checking sum each iteration
-    cluster = np.zeros(spins.size, dtype=np.int8)
-    frontier = np.zeros(spins.size, dtype=np.int8)
-    
-    # Add seed to cluster and frontier
-    cluster[seed_idx] = 1
-    frontier[seed_idx] = 1
-    frontier_size = 1
-    
-    # Use a counter instead of np.sum each iteration
-    while frontier_size > 0:
-        # Find frontier nodes efficiently
-        frontier_indices = np.where(frontier == 1)[0]
-        # Pick the first one instead of a random choice (much faster)
-        current = frontier_indices[0]
-        frontier[current] = 0
-        frontier_size -= 1
+    for _ in range(spins.size):
+        seed_idx = np.random.randint(0, spins.size)
+        # calculate the P_add
+        P_add = 1 - np.exp(-2*J*beta)
+        # Pick a random starting node
+        seed_spin = spins[seed_idx]
         
-        # Get neighbors of current node
-        node_neighs = neighbors[current]
-        # Process only valid neighbors (-1 indicates no neighbor)
-        valid_mask = node_neighs != -1
-        valid_neighbors = node_neighs[valid_mask]
+        # Use arrays instead of checking sum each iteration
+        cluster = np.zeros(spins.size, dtype=np.int8)
+        frontier = np.zeros(spins.size, dtype=np.int8)
         
-        # Find neighbors with same spin as seed that aren't already in cluster
-        for neigh in valid_neighbors:
-            if spins[neigh] == seed_spin and cluster[neigh] == 0:
-                # Add to cluster with probability P_add
-                if np.random.random() < P_add:
-                    cluster[neigh] = 1
-                    frontier[neigh] = 1
-                    frontier_size += 1
-    
-    # Flip all spins in the cluster
-    cluster_indices = np.where(cluster == 1)[0]
-    spins[cluster_indices] *= -1
+        # Add seed to cluster and frontier
+        cluster[seed_idx] = 1
+        frontier[seed_idx] = 1
+        frontier_size = 1
+        
+        # Use a counter instead of np.sum each iteration
+        while frontier_size > 0:
+            # Find frontier nodes efficiently
+            frontier_indices = np.where(frontier == 1)[0]
+            # Pick the first one instead of a random choice (much faster)
+            current = frontier_indices[0]
+            frontier[current] = 0
+            frontier_size -= 1
+            
+            # Get neighbors of current node
+            node_neighs = neighbors[current]
+            # Process only valid neighbors (-1 indicates no neighbor)
+            valid_mask = node_neighs != -1
+            valid_neighbors = node_neighs[valid_mask]
+            
+            # Find neighbors with same spin as seed that aren't already in cluster
+            for neigh in valid_neighbors:
+                if spins[neigh] == seed_spin and cluster[neigh] == 0:
+                    # Add to cluster with probability P_add
+                    if np.random.random() < P_add:
+                        cluster[neigh] = 1
+                        frontier[neigh] = 1
+                        frontier_size += 1
+        
+        # Flip all spins in the cluster
+        cluster_indices = np.where(cluster == 1)[0]
+        spins[cluster_indices] *= -1
             
     return spins
             

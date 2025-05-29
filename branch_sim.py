@@ -19,7 +19,7 @@ from tqdm import tqdm
 import networkx as nx
 import random 
 
-from utils.branch_sim_utils import convert_branch_coords_to_graph
+from utils.branch_sim_utils import convert_branch_coords_to_graph, plot_branch_network, plot_branch_graph
 
 from numba import int32, float32
 from numba.experimental import jitclass
@@ -33,7 +33,6 @@ np.random.seed(43)
 
 
 ### tissue 1 subroutines as numba methods ###
-
 
 
 def subroutine_1(index_rnr, coordinates, node, min_branch, lstep, fchem, prob_branch):
@@ -82,7 +81,6 @@ def subroutine_1(index_rnr, coordinates, node, min_branch, lstep, fchem, prob_br
             skip += 1
     
     return node, angle
-
 
 @njit
 def subroutine_2(node, coordinates, angle, node_temp, radavoid, fav):
@@ -241,7 +239,7 @@ def compute_probabilities(angle_values, fchem, prob_branch):
 
 class MamSimulation:
 
-    def __init__(self, tmax=150, prob_branch=0.03, fav=-0.1, fchem=0.6, graph_output=True, seed=43):
+    def __init__(self, tmax=150, prob_branch=0.03, fav=-0.1, fchem=0.6, graph_output=True, seed=43, max_nodes=None):
         np.random.seed(seed)
         self.Lx = 200
         self.Lz = 300
@@ -263,6 +261,7 @@ class MamSimulation:
 
         self.tmax = tmax
         self.graph_output = graph_output
+        self.max_nodes = max_nodes
     # prob_branch: probability of branching
     # fav: favorability of self-avoidance
     # fchem: favorability of chemical guidance -> influences directional bias of branch growth
@@ -433,6 +432,7 @@ class MamSimulation:
     def simulate(self):
         print("Starting simulation...")
         start_time = time.time()
+        self.tmax = 100_000 if self.max_nodes is not None else self.tmax
         t = 0
         for _ in tqdm(range(self.tmax)):
             t+= 1
@@ -442,6 +442,9 @@ class MamSimulation:
                 self.tissue1(self.prob_branch,self.fav,self.fchem)
             if len(self.node) == 0:
                 break
+            if self.max_nodes is not None:
+                if len(self.coordinates) > self.max_nodes:
+                    break
         end_time = time.time()
 
         # remove duplicate first node
@@ -458,8 +461,6 @@ class MamSimulation:
         G = convert_branch_coords_to_graph(self.coordinates) if self.graph_output else None
 
         return self.coordinates, self.evolve, G
-
-
 
 def generate_branches(tmax, seeds: list[int], prob_branch:float, fav:float, fchem:float):
     output_folder = "output/branch_structures"
@@ -482,9 +483,21 @@ def generate_branches(tmax, seeds: list[int], prob_branch:float, fav:float, fche
 
 if __name__ == "__main__":
 
+    sim = MamSimulation(tmax=150, prob_branch=0.6, fav=-0.1, fchem=0.0, max_nodes=100)
+    coordinates, evolve, G = sim.simulate()
+    
+    print(f"Total nodes: {len(coordinates)}")
 
-    seeds = list(range(50))
-    generate_branches(tmax=500, seeds=seeds, prob_branch=0.03, fav=-0.1, fchem=0.6)
+    # average branching factor: number of non-root nodes divided by the number of non-leaf nodes
+    avg_branching_factor = (coordinates.shape[0] - 1) / (coordinates.shape[0] - len(sim.node))
+    print(f"Average branching factor: {avg_branching_factor}")
+    
+    # plot the graph
+    plot_branch_graph(G)
+
+
+    # seeds = list(range(50))
+    # generate_branches(tmax=500, seeds=seeds, prob_branch=0.1, fav=-0.1, fchem=0.0)
     # from utils.branch_sim_utils import branch_growth_animation, plot_branch_network
 
     # tmax = 150
