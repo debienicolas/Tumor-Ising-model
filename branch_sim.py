@@ -462,7 +462,7 @@ class MamSimulation:
 
         return self.coordinates, self.evolve, G
 
-def generate_branches(tmax, seeds: list[int], prob_branch:float, fav:float, fchem:float):
+def generate_branches(tmax, seeds: list[int], prob_branch:float, fav:float, fchem:float=0.0):
     output_folder = "output/branch_structures"
     os.makedirs(output_folder, exist_ok=True)
 
