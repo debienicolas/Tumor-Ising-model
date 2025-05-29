@@ -402,7 +402,7 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
     # magn and energy have been averaged over a certain amount of samples
     return model
 
-def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equilib_steps:int, n_mcmc_steps:int, n_samples:int, n_sample_interval:int, temps:np.ndarray) -> IsingModel:
+def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equilib_steps:int, n_mcmc_steps:int, n_samples:int, n_sample_interval:int, temps:np.ndarray, step_algorithm:str) -> IsingModel:
     """
     Simulate the entire ising model on all provided temps.
     General steps:
@@ -417,21 +417,34 @@ def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equil
         print(f"Using {n_processes} processes")
         pool = Pool(n_processes)
 
+        intermediate_results = []
         results = {}
         for t in tqdm(temps):
             # create a model
             nodes = np.random.choice([-1, 1], size=nodes.size)
             model = IsingModel(nodes=nodes, neighbors=neighbors, temp=t, J=J, 
                              n_equilib_steps=n_equilib_steps, n_mcmc_steps=n_mcmc_steps, 
-                             n_samples=n_samples, n_sample_interval=n_sample_interval)
+                             n_samples=n_samples, n_sample_interval=n_sample_interval,
+                             step_algorithm=step_algorithm)
             
             # run the simulation in parallel, collect the results
-            results[t] = pool.apply_async(simulate_ising_model, args=(model,))
+            intermediate_results.append(pool.apply_async(simulate_ising_model, args=(model,)))
+            #curr_result = curr_result.get()
+            #curr_t = curr_result.temp
+            #results[curr_t] = curr_result
+            #results[t] = pool.apply_async(simulate_ising_model, args=(model,))
         
         # Wait for all processes to complete and collect results
-        final_results = {t: result.get() for t, result in results.items()}
+        for res in intermediate_results:
+            curr_result = res.get()
+            curr_t = curr_result.temp
+            results[curr_t] = curr_result
+        #final_results = {t: result.get() for t, result in results.items()}
+
+        # sort the results by temp
+        results = {t: results[t] for t in sorted(results.keys())}
         
-        return final_results
+        return results
         
     except Exception as e:
         print(f"Error in parallel processing: {e}")
