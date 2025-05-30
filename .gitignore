@@ -25,3 +25,9 @@ readme_hidden.md
 output/branch_structures/
 
 ising_visualization
+
+# slurm logs and scripts
+logs_slurm/
+hpc_scripts/*
+
+.vscode/

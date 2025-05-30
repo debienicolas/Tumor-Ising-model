@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.colors import ListedColormap
-import pydot
 from networkx.drawing.nx_agraph import graphviz_layout
 import time 
 from tqdm import tqdm
@@ -11,9 +10,7 @@ from PIL import Image
 import networkx as nx
 import os
 from datetime import datetime
-import pandas as pd
 from branch_sim import MamSimulation
-from scipy.spatial import KDTree
 from collections import defaultdict
 from numba import prange
 from multiprocessing import Pool, cpu_count
@@ -402,7 +399,7 @@ def simulate_ising_model(model: IsingModel) -> IsingModel:
     # magn and energy have been averaged over a certain amount of samples
     return model
 
-def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equilib_steps:int, n_mcmc_steps:int, n_samples:int, n_sample_interval:int, temps:np.ndarray, step_algorithm:str) -> IsingModel:
+def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equilib_steps:int, n_mcmc_steps:int, n_samples:int, n_sample_interval:int, temps:np.ndarray, step_algorithm:str, n_cores:int=1) -> IsingModel:
     """
     Simulate the entire ising model on all provided temps.
     General steps:
@@ -413,7 +410,7 @@ def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equil
     """
     try:
         # create a pool of processes
-        n_processes = cpu_count() - 2
+        n_processes = n_cores
         print(f"Using {n_processes} processes")
         pool = Pool(n_processes)
 
