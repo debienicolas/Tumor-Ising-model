@@ -12,6 +12,22 @@ from IsingModel import IsingModel
 from main_tree import simulate_ising_model, simulate_ising_full
 from branch_sim import MamSimulation
 from utils.gen_utils import graph_to_model_format
+from utils.branch_sim_utils import plot_branch_network
+
+
+def get_branch_stats(G, coordinates):
+    stats = {}
+    # number of nodes and number of edges
+    stats["num_nodes"] = G.number_of_nodes()
+    stats["num_edges"] = G.number_of_edges()
+    # Average degree of the graph
+    stats["avg_degree"] = np.mean([d for _, d in G.degree()])
+    
+    # unique branch count (based on the current_branch_id column in the coordinates array)
+    stats["num_branches"] = len(np.unique(coordinates[:, 3]))
+    
+    
+    return stats
 
 def run_branch():
     config = wandb.config
