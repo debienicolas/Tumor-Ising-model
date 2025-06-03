@@ -33,7 +33,7 @@ def single_run():
         "fav": -0.1,
         "fchem": 0.0,
         "prob_branch": 0.03,
-        "seed": 43,
+        "seed": 46, #
         "cores":n_cores
     }
     wandb.init(config=config, project="ising_model")

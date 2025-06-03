@@ -259,10 +259,10 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
 
     if n_samples > 0:
         # calculate the specific heat
-        specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))*(beta**2 /spins.size)
+        specific_heat = ((E2/n_samples) - ((E1**2)/(n_samples**2)))*(beta**2) #)/spins.size)
 
         # calculate the susceptibility
-        susceptibility = ((M2/n_samples) - ((M1**2)/(n_samples**2)))*(beta / spins.size)
+        susceptibility = ((M2/n_samples) - ((M1**2)/(n_samples**2)))*(beta )#/ spins.size)
 
     else:
         specific_heat = None
