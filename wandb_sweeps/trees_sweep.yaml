@@ -1,12 +1,14 @@
 program: wandb_run.py
-name: dim_crossover_sweep_small
+name: tree_sweep
 project: ising_model
 method: grid
 parameters:
   structure:
-    values: ["branch"]
-  tmax:
-    values: [75,100,125,150, 175, 200]
+    values: ["tree"]
+  depth:
+    values: [2,3,4,5]
+  d:
+    values: [2,3,4,5]
   temps_min:
     values: [0.01]
   temps_max:
@@ -21,18 +23,8 @@ parameters:
     values: [1]
   n_samples:
     values: [None]
-  prob_branch:
-    values: [0.03]
-  fav:
-    values: [-0.1]
-  fchem:
-    values: [0.0]
-  seed:
-    values: [43,44,45,46,47]
   cores:
     values: [0]
   step_algorithm:
     values: ["wolff"]
-  n_layers:
-    values: [1,2,3,4,5]
   

@@ -226,6 +226,42 @@ def create_lattice(size:int) -> tuple[np.ndarray, np.ndarray]:
     neighbors = neighbors.astype(np.int32)
     return nodes, neighbors
 
+def create_3D_lattice(size:int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Create a 3D lattice of size size x size x size
+    """
+    # nodes is a 1D array representing all nodes in the 3D lattice
+    nodes = np.ones(size*size*size)
+    # neighbors is a 2D array with the indices of the neighbors
+    # in a 3D grid each node has 6 neighbors (up, down, left, right, forward, backward)
+    neighbors = np.zeros((size*size*size, 6))
+    
+    # loop over the nodes and assign the neighbors, use wrapping to handle the edges
+    for i in range(size*size*size):
+        # Convert 1D index to 3D coordinates
+        x = i % size
+        y = (i // size) % size
+        z = i // (size * size)
+        
+        # Calculate neighbors with periodic boundary conditions
+        # Left and right (x direction)
+        neighbor_left = z * size * size + y * size + ((x - 1) % size)
+        neighbor_right = z * size * size + y * size + ((x + 1) % size)
+        
+        # Up and down (y direction) 
+        neighbor_down = z * size * size + ((y - 1) % size) * size + x
+        neighbor_up = z * size * size + ((y + 1) % size) * size + x
+        
+        # Forward and backward (z direction)
+        neighbor_backward = ((z - 1) % size) * size * size + y * size + x
+        neighbor_forward = ((z + 1) % size) * size * size + y * size + x
+        
+        neighbors[i] = np.array([neighbor_up, neighbor_down, neighbor_left, neighbor_right, neighbor_forward, neighbor_backward])
+    
+    # turn neighbors into list of ints
+    neighbors = neighbors.astype(np.int32)
+    return nodes, neighbors
+
 
 def create_binary_tree(depth:int):
     # Create a binary tree using NetworkX
@@ -269,6 +305,71 @@ def create_binary_tree(depth:int):
     # print("Tree structure:")
     # for node in sorted(G.nodes()):
     #     print(f"Node {node}: [parent, child1, child2] = {neighbors[node]}")
+    
+    return nodes, neighbors
+
+def create_d_ary_tree(depth: int, d: int = 2):
+    """
+    Create a d-ary regular tree of given depth.
+    
+    Parameters:
+    -----------
+    depth : int
+        The depth of the tree (number of levels)
+    d : int
+        The number of children per node (degree of the tree)
+        
+    Returns:
+    --------
+    tuple[np.ndarray, np.ndarray]
+        nodes: 1D array of node values (all initialized to 1)
+        neighbors: 2D array where each row contains [parent, child1, child2, ..., child_d]
+                  with -1 for non-existent neighbors
+    """
+    # Create a d-ary tree using NetworkX
+    G = nx.balanced_tree(d, depth-1)  # d children per node, depth-1 levels
+    
+    # Initialize nodes array (all nodes start with value 1)
+    nodes = np.ones(len(G))
+    
+    # Initialize neighbors array: 1 parent + d children = d+1 total
+    neighbors = np.zeros((len(G), d+1))
+    neighbors.fill(-1)  # Default to no neighbors
+    
+    # For each node, get its neighbors (both children and parent)
+    for node in sorted(G.nodes()):
+        # Get all neighbors (both children and parent)
+        all_neighbors = sorted(list(G.neighbors(node)))
+        
+        # For root node (node 0), it only has children
+        if node == 0:
+            # Store children in positions 1 to d+1
+            neighbor_row = [-1]  # No parent for root
+            for i in range(d):
+                if i < len(all_neighbors):
+                    neighbor_row.append(all_neighbors[i])
+                else:
+                    neighbor_row.append(-1)
+            neighbors[node] = np.array(neighbor_row)
+            
+        # For other nodes, they have one parent and potentially d children
+        else:
+            # Find the parent (it's the neighbor with smallest index)
+            parent = min(all_neighbors)
+            # Find the children (they're the neighbors with larger indices)
+            children = [n for n in all_neighbors if n > node]
+            
+            # Store parent and children: [parent, child1, child2, ..., child_d]
+            neighbor_row = [parent]
+            for i in range(d):
+                if i < len(children):
+                    neighbor_row.append(children[i])
+                else:
+                    neighbor_row.append(-1)
+            neighbors[node] = np.array(neighbor_row)
+    
+    # Convert neighbors to int32
+    neighbors = neighbors.astype(np.int32)
     
     return nodes, neighbors
 

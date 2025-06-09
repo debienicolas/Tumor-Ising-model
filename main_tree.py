@@ -36,29 +36,23 @@ def calc_neighbor_sum(i:int, spins:np.ndarray, neighbors:np.ndarray) -> float:
     return result
 
 @numba.njit(nopython=True, fastmath=True)
-def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float) -> float:
+def calc_hamiltonian(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float=None) -> float:
     """
     Calculate the Hamiltonian of the system.
     end 
     """
     H = 0
+    h = 0.01
     for i in range(0,spins.shape[0]):
         node_neigh = neighbors[i,:]
         valid_neighs = node_neigh[node_neigh != -1]
         for j in valid_neighs:
-            H += -J * spins[i] * spins[j]
-    return H / 2
+            H += (-J * spins[i] * spins[j]) / 2
+        # if it is a leaf node, add a small magnetic field to the energy
+        if np.sum(neighbors[i,1:]) == (neighbors.shape[1]-1)*-1:
+            H += -h * spins[i]
+    return H 
 
-    H = 0
-    for i in range(0,spins.shape[0]):
-        neighs_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
-        if np.isnan(neighs_sum):
-            print(f"NaN neighbor sum at node {i}")
-            continue
-        H += -J * spins[i] * neighs_sum
-    # if H == 0:
-    #     print("Zero Hamiltonian detected")
-    return H / 2
 
 @numba.njit(nopython=True, fastmath=True)
 def calc_magnetization(spins:np.ndarray) -> float:
@@ -68,16 +62,14 @@ def calc_magnetization(spins:np.ndarray) -> float:
     return np.abs(np.sum(spins))
 
 @numba.njit(nopython=True, fastmath=True)
-def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int) -> float:
+def calc_energy_diff(spins:np.ndarray, neighbors:np.ndarray, J:float, i:int, beta:float=None) -> float:
     """
     Calculate the energy difference of flipping a spin.
     """
-    hamil_before = calc_hamiltonian(spins, neighbors, J)
+    hamil_before = calc_hamiltonian(spins, neighbors, J, beta=beta)
     spins[i] *= -1
-    hamil_after = calc_hamiltonian(spins, neighbors, J)
+    hamil_after = calc_hamiltonian(spins, neighbors, J, beta=beta)
     return hamil_after - hamil_before
-    neighbors_sum = calc_neighbor_sum(i,spins, neighbors=neighbors)
-    return 2 * J * spins[i] * neighbors_sum
 
 @numba.njit(nopython=True, fastmath=True)
 def metropolis_step(spins: np.ndarray, neighbors: np.ndarray, J: float, beta: float) -> np.ndarray:
@@ -109,13 +101,13 @@ def glauber_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta: float)->
     Differs from the Metropolis step in that it uses the Fermi function to determine the probability of flipping the spin. 
     ref. https://en.wikipedia.org/wiki/Glauber_dynamics
     """
-    #for _ in range(spins.size):
-    i = np.random.randint(0, spins.size)
-    energy_diff = calc_energy_diff(spins, neighbors, J, i)
-    # Differs from metropolist step: use the Fermi function
-    prob = 1 / (1 + np.exp(energy_diff*beta))
-    if np.random.random() < prob:
-        spins[i] *= -1
+    for _ in range(spins.size):
+        i = np.random.randint(0, spins.size)
+        energy_diff = calc_energy_diff(spins, neighbors, J, i, beta=beta)
+        # Differs from metropolist step: use the Fermi function
+        prob = 1 / (1 + np.exp(energy_diff*beta))
+        if np.random.random() < prob:
+            spins[i] *= -1
     return spins
 
 @numba.njit(nopython=True, fastmath=True, parallel=False)
@@ -168,7 +160,84 @@ def wolff_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float)-> np
         spins[cluster_indices] *= -1
             
     return spins
+
+#@numba.njit(nopython=True, fastmath=True, parallel=False)
+def wolff_step_boundary(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float)-> np.ndarray:
+    """
+    Perform a single Wolff sweep on the system.
+    Leaf nodes (nodes with only 1 valid neighbor) are not updated.
+    """
+    # First, identify leaf nodes
+    leaf_nodes = np.zeros(spins.size, dtype=np.int8)
+    for i in range(spins.size):
+        valid_count = 0
+        for j in range(neighbors.shape[1]):
+            if neighbors[i, j] != -1:
+                valid_count += 1
+        if valid_count == 1:
+            leaf_nodes[i] = 1
+    
+    # Get non-leaf nodes for seed selection
+    non_leaf_indices = np.zeros(spins.size, dtype=np.int32)
+    non_leaf_count = 0
+    for i in range(spins.size):
+        if leaf_nodes[i] == 0:
+            non_leaf_indices[non_leaf_count] = i
+            non_leaf_count += 1
+    
+    if non_leaf_count == 0:
+        return spins  # All nodes are leaf nodes, nothing to update
+    
+    for _ in range(spins.size):
+        # Pick seed only from non-leaf nodes
+        seed_idx = non_leaf_indices[np.random.randint(0, non_leaf_count)]
+        
+        # calculate the P_add
+        P_add = 1 - np.exp(-2*J*beta)
+        # Pick a random starting node
+        seed_spin = spins[seed_idx]
+        
+        # Use arrays instead of checking sum each iteration
+        cluster = np.zeros(spins.size, dtype=np.int8)
+        frontier = np.zeros(spins.size, dtype=np.int8)
+        
+        # Add seed to cluster and frontier
+        cluster[seed_idx] = 1
+        frontier[seed_idx] = 1
+        frontier_size = 1
+        
+        # Use a counter instead of np.sum each iteration
+        while frontier_size > 0:
+            # Find frontier nodes efficiently
+            frontier_indices = np.where(frontier == 1)[0]
+            # Pick the first one instead of a random choice (much faster)
+            current = frontier_indices[0]
+            frontier[current] = 0
+            frontier_size -= 1
             
+            # Get neighbors of current node
+            node_neighs = neighbors[current]
+            # Process only valid neighbors (-1 indicates no neighbor)
+            valid_mask = node_neighs != -1
+            valid_neighbors = node_neighs[valid_mask]
+            
+            # Find neighbors with same spin as seed that aren't already in cluster
+            for neigh in valid_neighbors:
+                # Skip leaf nodes - they cannot be added to clusters
+                if leaf_nodes[neigh] == 0 and spins[neigh] == seed_spin and cluster[neigh] == 0:
+                    # Add to cluster with probability P_add
+                    if np.random.random() < P_add:
+                        cluster[neigh] = 1
+                        frontier[neigh] = 1
+                        frontier_size += 1
+        
+        # Flip all spins in the cluster (excluding leaf nodes)
+        cluster_indices = np.where(cluster == 1)[0]
+        for idx in cluster_indices:
+            if leaf_nodes[idx] == 0:
+                spins[idx] *= -1
+            
+    return spins
 
 #@numba.njit(nopython=True, fastmath=True)
 def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equilibration:int, n_mcmc:int, n_samples:int, n_sample_interval:int, step_algorithm:str) -> np.ndarray:
@@ -216,9 +285,23 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
             spins = glauber_step(spins, neighbors, J, beta)
         elif step_algorithm == "wolff":
             spins = wolff_step(spins, neighbors, J, beta)
+        elif step_algorithm == "wolff_boundary":
+            spins = wolff_step_boundary(spins, neighbors, J, beta)
+            # check that the leaf nodes are +1
+            for j in range(neighbors.shape[0]):
+                if np.sum(neighbors[j,1:]) == (neighbors.shape[1]-1)*-1:
+                    assert spins[j] == 1, "Leaf node is not +1"
+                    
+        # subselect the non_leaf spins to calculate the energy
+        # mask = np.ones(spins.size, dtype=np.int8)
+        # for j in range(neighbors.shape[0]):
+        #     if np.sum(neighbors[j,1:]) == (neighbors.shape[1]-1)*-1:
+        #         mask[j] = 0
+        # non_leaf_spins = spins[mask == 1]
+        # non_leaf_neighbors = neighbors[mask == 1]
         
         # save the equilibrium time steps
-        energy_equil[i] = calc_hamiltonian(spins, neighbors, J) / spins.size
+        energy_equil[i] = calc_hamiltonian(spins, neighbors, J, beta=beta) / spins.size
         magn_equil[i] = calc_magnetization(spins) / spins.size
 
     ##### MCMC #####
@@ -229,8 +312,22 @@ def simulate(spins:np.ndarray, neighbors:np.ndarray, J:float, beta:float, n_equi
             spins = glauber_step(spins, neighbors, J, beta)
         elif step_algorithm == "wolff":
             spins = wolff_step(spins, neighbors, J, beta)
+        elif step_algorithm == "wolff_boundary":
+            spins = wolff_step_boundary(spins, neighbors, J, beta)
+            # check that the leaf nodes are +1 boundary conditions
+            for j in range(neighbors.shape[0]):
+                if np.sum(neighbors[j,1:]) == (neighbors.shape[1]-1)*-1:
+                    assert spins[j] == 1, "Leaf node is not +1"
         
-        energy = calc_hamiltonian(spins, neighbors, J)/spins.size
+        # subselect the non_leaf spins to calculate the energy
+        # mask = np.ones(spins.size, dtype=np.int8)
+        # for j in range(neighbors.shape[0]):
+        #     if np.sum(neighbors[j,1:]) == (neighbors.shape[1]-1)*-1:
+        #         mask[j] = 0
+        # non_leaf_spins = spins[mask == 1]
+        # non_leaf_neighbors = neighbors[mask == 1]
+        
+        energy = calc_hamiltonian(spins, neighbors, J, beta=beta) / spins.size
         energy_all[i] = energy
         magn = calc_magnetization(spins)/spins.size
         magn_all[i] = magn
@@ -419,6 +516,13 @@ def simulate_ising_full(nodes:np.ndarray, neighbors:np.ndarray, J:float, n_equil
         for t in tqdm(temps):
             # create a model
             nodes = np.random.choice([-1, 1], size=nodes.size)
+            
+            # set the leaf nodes to +1 boundary conditions
+            if step_algorithm == "wolff_boundary":  
+                for i in range(neighbors.shape[0]):
+                    if np.sum(neighbors[i,1:]) == (neighbors.shape[1]-1)*-1:
+                        nodes[i] = 1
+            
             model = IsingModel(nodes=nodes, neighbors=neighbors, temp=t, J=J, 
                              n_equilib_steps=n_equilib_steps, n_mcmc_steps=n_mcmc_steps, 
                              n_samples=n_samples, n_sample_interval=n_sample_interval,

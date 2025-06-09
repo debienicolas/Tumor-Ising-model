@@ -12,7 +12,7 @@ from main_tree import simulate_ising_model, simulate_ising_full
 from branch_sim import MamSimulation
 from utils.gen_utils import graph_to_model_format
 
-from wandb_run import run_branch
+from wandb_run import run_branch, run_dim_cross, run_tree
 
 ### set the amount of cores to use from slurm environment
 n_cores = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
@@ -22,22 +22,21 @@ print(f"Using {n_cores} cores")
 
 def single_run():
     config = {
-        "structure": "branch",
-        "tmax": 100,
-        "temps": np.linspace(0.01, 5.0, 200).tolist(),
-        "n_equilib_steps": 5,
+        "structure": "tree",
+        "depth": 10,
+        "d": 2,
+        "temps_min": 0.01,
+        "temps_max": 5.0,
+        "temps_num": 200,
+        "n_equilib_steps": 100,
         "n_mcmc_steps": 500,
-        "n_sample_interval": 1,
+        "n_sample_interval": 5,
         "n_samples": None,
-        "step_algorithm": "wolff",
-        "fav": -0.1,
-        "fchem": 0.0,
-        "prob_branch": 0.03,
-        "seed": 46, #
-        "cores":n_cores
+        "step_algorithm": "glauber",
+        "cores":n_cores,
     }
     wandb.init(config=config, project="ising_model")
-    run_branch()
+    run_tree()
     wandb.finish()
 
 
