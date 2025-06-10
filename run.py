@@ -32,7 +32,7 @@ def single_run():
         "n_mcmc_steps": 500,
         "n_sample_interval": 5,
         "n_samples": None,
-        "step_algorithm": "glauber",
+        "step_algorithm": "metropolis",
         "cores":n_cores,
     }
     wandb.init(config=config, project="ising_model")
