@@ -1,0 +1,30 @@
+program: wandb_run.py
+name: lattice_sweep
+project: ising_model
+method: grid
+parameters:
+  structure:
+    values: ["trees"]
+  dims:
+    values: [2,3]
+  size:
+    values: [5,10,15,20,30,40]
+  temps_min:
+    values: [0.01]
+  temps_max:
+    values: [5.0]
+  temps_num:
+    values: [200]
+  n_equilib_steps:
+    values: [3]
+  n_mcmc_steps:
+    values: [100]
+  n_sample_interval:
+    values: [1]
+  n_samples:
+    values: [None]
+  cores:
+    values: [0]
+  step_algorithm:
+    values: ["wolff"]
+  

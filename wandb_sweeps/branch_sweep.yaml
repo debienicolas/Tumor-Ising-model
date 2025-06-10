@@ -1,0 +1,36 @@
+program: run.py
+name: branch_sweep
+project: ising_model
+method: grid
+parameters:
+  structure:
+    values: ["branch"]
+  tmax:
+    values: [75,100,125,150,175,200,250]
+  temps_min:
+    values: [0.01]
+  temps_max:
+    values: [5.0]
+  temps_num:
+    values: [200]
+  n_equilib_steps:
+    values: [3]
+  n_mcmc_steps:
+    values: [500,750,1000]
+  n_sample_interval:
+    values: [1]
+  n_samples:
+    values: [None]
+  prob_branch:
+    values: [0.03, 0.06, 0.12]
+  fav:
+    values: [-0.1,-0.05,-0.15]
+  fchem:
+    values: [0.0]
+  seed:
+    values: [43]
+  cores:
+    values: [0]
+  step_algorithm:
+    values: ["wolff"]
+  
