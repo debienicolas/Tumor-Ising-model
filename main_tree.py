@@ -112,13 +112,13 @@ def glauber_step(spins:np.ndarray, neighbors:np.ndarray, J:float, beta: float)->
     Differs from the Metropolis step in that it uses the Fermi function to determine the probability of flipping the spin. 
     ref. https://en.wikipedia.org/wiki/Glauber_dynamics
     """
-    #for _ in range(spins.size):
-    i = np.random.randint(0, spins.size)
-    energy_diff = calc_energy_diff(spins, neighbors, J, i)
-    # Differs from metropolist step: use the Fermi function
-    prob = 1 / (1 + np.exp(energy_diff*beta))
-    if np.random.random() < prob:
-        spins[i] *= -1
+    for _ in range(spins.size):
+        i = np.random.randint(0, spins.size)
+        energy_diff = calc_energy_diff(spins, neighbors, J, i)
+        # Differs from metropolist step: use the Fermi function
+        prob = 1 / (1 + np.exp(energy_diff*beta))
+        if np.random.random() < prob:
+            spins[i] *= -1
     return spins
 
 @numba.njit(nopython=True, fastmath=True, parallel=False)
