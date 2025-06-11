@@ -25,6 +25,7 @@ class IsingModel:
     start_time:int = 100
     save_frames:bool = True
     dim_cross:int = 1
+    h:float = 0.0
 
     @property
     def beta(self):
